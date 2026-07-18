@@ -1,0 +1,90 @@
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./infrastructure/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - solid-video-verification
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost
+        NEXT_PUBLIC_SESSION_COOKIE: solid_video_verification_session
+    depends_on:
+      - backend
+    networks:
+      - solid-video-verification
+
+  backend:
+    build:
+      context: ./backend
+    volumes:
+      - backend_storage:/var/www/backend/storage/app
+    env_file:
+      - ./backend/.env
+    environment:
+      DB_HOST: db
+      REDIS_HOST: redis
+      LIVEKIT_HOST: http://livekit:7880
+      LIVEKIT_URL: ws://localhost:7880
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - solid-video-verification
+
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${DB_DATABASE:-solid_video_verification}
+      MYSQL_USER: ${DB_USERNAME:-solid}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-solid_secret}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root_secret}
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - solid-video-verification
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks:
+      - solid-video-verification
+
+  livekit:
+    image: livekit/livekit-server:latest
+    command: --config /etc/livekit.yaml
+    restart: unless-stopped
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "50000-50100:50000-50100/udp"
+    volumes:
+      - ./infrastructure/livekit/livekit.yaml:/etc/livekit.yaml:ro
+    depends_on:
+      - redis
+    networks:
+      - solid-video-verification
+
+networks:
+  solid-video-verification:
+    driver: bridge
+
+volumes:
+  db_data:
+  backend_storage:
