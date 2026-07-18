@@ -55,7 +55,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       await api.post("/auth/logout");
     } finally {
-      queryClient.setQueryData(["auth", "me"], null);
       queryClient.clear();
       router.replace("/login");
     }

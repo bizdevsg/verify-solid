@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -24,10 +24,18 @@ export default function LoginPage() {
 }
 
 function LoginForm() {
-  const { login, isLoggingIn } = useAuth();
+  const { user, isLoading, login, isLoggingIn } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Real auth check (not just cookie presence) — skip the form if this
+  // browser already has a genuinely authenticated session.
+  useEffect(() => {
+    if (!isLoading && user) {
+      router.replace(searchParams.get("redirect") || "/dashboard");
+    }
+  }, [isLoading, user, router, searchParams]);
 
   const {
     register,
