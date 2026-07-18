@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { VideoRoom } from "@/components/VideoRoom";
 import { LoadingState } from "@/components/LoadingState";
@@ -37,6 +37,12 @@ export default function StaffMeetingRoomPage({ params }: { params: Promise<{ uui
     setShowEndForm(true);
   };
 
+  // Stable reference — an inline arrow here would change identity on every
+  // re-render and needlessly cycle the LiveKit room's event listeners.
+  const handleLeave = useCallback(() => {
+    router.push(`/meetings/${uuid}`);
+  }, [router, uuid]);
+
   if (isLoading || joinToken.isPending || !joinToken.data) {
     return (
       <div className="flex h-screen items-center justify-center bg-charcoal">
@@ -65,7 +71,7 @@ export default function StaffMeetingRoomPage({ params }: { params: Promise<{ uui
         token={joinToken.data.token}
         title={meeting.title}
         startedAt={meeting.started_at ? new Date(meeting.started_at) : null}
-        onLeave={() => router.push(`/meetings/${uuid}`)}
+        onLeave={handleLeave}
         endAction={
           <button
             onClick={openEndForm}

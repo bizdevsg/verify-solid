@@ -1,7 +1,7 @@
 "use client";
 
 import "@livekit/components-styles";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import {
   DisconnectButton,
   LiveKitRoom,
@@ -11,7 +11,7 @@ import {
   useConnectionState,
   useTracks,
 } from "@livekit/components-react";
-import { ConnectionState, Track } from "livekit-client";
+import { ConnectionState, MediaDeviceFailure, Track } from "livekit-client";
 import { MeetingTimer } from "@/components/MeetingTimer";
 
 interface VideoRoomProps {
@@ -27,6 +27,22 @@ export function VideoRoom({ url, token, title, startedAt, onLeave, endAction }: 
   const [mediaError, setMediaError] = useState<string | null>(null);
   const [roomError, setRoomError] = useState<string | null>(null);
 
+  // LiveKitRoom re-runs its connect effect whenever onError's identity
+  // changes (it's a real dependency inside the SDK, not just an event
+  // listener) — an inline arrow function here would recreate itself on
+  // every re-render of a parent (e.g. a page polling meeting status every
+  // few seconds), silently reconnecting the call over and over and looking
+  // like random disconnects/stutter. useCallback keeps the reference stable.
+  const handleError = useCallback((error: Error) => {
+    setRoomError(error.message || "Gagal terhubung ke ruang meeting.");
+  }, []);
+
+  const handleMediaDeviceFailure = useCallback((failure?: MediaDeviceFailure) => {
+    if (failure) {
+      setMediaError("Tidak dapat mengakses kamera atau mikrofon. Periksa izin perangkat Anda.");
+    }
+  }, []);
+
   return (
     <LiveKitRoom
       serverUrl={url}
@@ -35,12 +51,8 @@ export function VideoRoom({ url, token, title, startedAt, onLeave, endAction }: 
       video
       audio
       onDisconnected={onLeave}
-      onError={(error) => setRoomError(error.message || "Gagal terhubung ke ruang meeting.")}
-      onMediaDeviceFailure={(failure) => {
-        if (failure) {
-          setMediaError("Tidak dapat mengakses kamera atau mikrofon. Periksa izin perangkat Anda.");
-        }
-      }}
+      onError={handleError}
+      onMediaDeviceFailure={handleMediaDeviceFailure}
       className="flex h-full flex-col bg-charcoal text-white"
     >
       <RoomAudioRenderer />
