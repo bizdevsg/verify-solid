@@ -54,4 +54,24 @@ class UserController extends Controller
 
         return $this->success(new UserResource($user), 'Akun staf berhasil diperbarui.');
     }
+
+    public function destroy(User $user)
+    {
+        $this->authorize('delete', $user);
+
+        // meetings.staff_id cascades on delete — hard-deleting a staff member
+        // with meeting history would silently wipe those verification
+        // records too. Block it and point the admin at deactivation instead,
+        // which keeps the account out of use without touching history.
+        if ($user->meetings()->exists()) {
+            return $this->error(
+                'Akun ini memiliki riwayat meeting dan tidak dapat dihapus. Nonaktifkan akun ini sebagai gantinya.',
+                'USER_HAS_MEETINGS'
+            );
+        }
+
+        $user->delete();
+
+        return $this->success(null, 'Akun berhasil dihapus.');
+    }
 }

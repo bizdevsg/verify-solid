@@ -44,3 +44,13 @@ export function useUpdateUser(uuid: string) {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["users"] }),
   });
 }
+
+export function useDeleteUser(uuid: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      await api.delete(`/users/${uuid}`);
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["users"] }),
+  });
+}

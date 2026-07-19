@@ -8,8 +8,9 @@ import { TopNavbar } from "@/components/TopNavbar";
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
 import { EmptyState } from "@/components/EmptyState";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useAuth } from "@/lib/auth-context";
-import { useCreateUser, useUpdateUser, useUsersList } from "@/hooks/useUsers";
+import { useCreateUser, useDeleteUser, useUpdateUser, useUsersList } from "@/hooks/useUsers";
 import { AppUser } from "@/lib/types";
 import { getApiErrorMessage } from "@/lib/api";
 
@@ -87,7 +88,7 @@ export default function UsersPage() {
               </thead>
               <tbody className="divide-y divide-gray-border">
                 {users.map((u) => (
-                  <UserRow key={u.uuid} user={u} />
+                  <UserRow key={u.uuid} user={u} isSelf={u.uuid === currentUser?.uuid} />
                 ))}
               </tbody>
             </table>
@@ -156,33 +157,74 @@ export default function UsersPage() {
   );
 }
 
-function UserRow({ user }: { user: AppUser }) {
+function UserRow({ user, isSelf }: { user: AppUser; isSelf: boolean }) {
   const updateUser = useUpdateUser(user.uuid);
+  const deleteUser = useDeleteUser(user.uuid);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   return (
-    <tr className="hover:bg-gray-light/60">
-      <td className="px-4 py-3 font-medium text-zinc-800">{user.name}</td>
-      <td className="px-4 py-3 text-zinc-600">{user.email}</td>
-      <td className="px-4 py-3 capitalize text-zinc-600">{user.role === "admin" ? "Admin" : "Petugas"}</td>
-      <td className="px-4 py-3">
-        <span
-          className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
-            user.is_active ? "bg-emerald-100 text-emerald-800" : "bg-zinc-200 text-zinc-500"
-          }`}
-        >
-          {user.is_active ? "Aktif" : "Nonaktif"}
-        </span>
-      </td>
-      <td className="px-4 py-3 text-right">
-        <button
-          onClick={() => updateUser.mutate({ is_active: !user.is_active })}
-          disabled={updateUser.isPending}
-          className="text-sm font-medium text-gold hover:underline disabled:opacity-50"
-        >
-          {user.is_active ? "Nonaktifkan" : "Aktifkan"}
-        </button>
-      </td>
-    </tr>
+    <>
+      <tr className="hover:bg-gray-light/60">
+        <td className="px-4 py-3 font-medium text-zinc-800">{user.name}</td>
+        <td className="px-4 py-3 text-zinc-600">{user.email}</td>
+        <td className="px-4 py-3 capitalize text-zinc-600">{user.role === "admin" ? "Admin" : "Petugas"}</td>
+        <td className="px-4 py-3">
+          <span
+            className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
+              user.is_active ? "bg-emerald-100 text-emerald-800" : "bg-zinc-200 text-zinc-500"
+            }`}
+          >
+            {user.is_active ? "Aktif" : "Nonaktif"}
+          </span>
+        </td>
+        <td className="px-4 py-3 text-right">
+          <div className="flex flex-col items-end gap-1">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => updateUser.mutate({ is_active: !user.is_active })}
+                disabled={updateUser.isPending}
+                className="text-sm font-medium text-gold hover:underline disabled:opacity-50"
+              >
+                {user.is_active ? "Nonaktifkan" : "Aktifkan"}
+              </button>
+              {!isSelf && (
+                <button
+                  onClick={() => {
+                    setDeleteError(null);
+                    setConfirmDelete(true);
+                  }}
+                  disabled={deleteUser.isPending}
+                  className="text-sm font-medium text-red-600 hover:underline disabled:opacity-50"
+                >
+                  Hapus
+                </button>
+              )}
+            </div>
+            {deleteError && <p className="max-w-xs text-xs text-red-600">{deleteError}</p>}
+          </div>
+        </td>
+      </tr>
+
+      <ConfirmDialog
+        open={confirmDelete}
+        title={`Hapus Akun ${user.name}?`}
+        description="Tindakan ini tidak dapat dibatalkan. Akun yang punya riwayat meeting tidak bisa dihapus — nonaktifkan saja akun tersebut."
+        confirmLabel="Ya, Hapus"
+        destructive
+        isLoading={deleteUser.isPending}
+        onCancel={() => setConfirmDelete(false)}
+        onConfirm={() => {
+          deleteUser.mutate(undefined, {
+            onSuccess: () => setConfirmDelete(false),
+            onError: (err) => {
+              setDeleteError(getApiErrorMessage(err, "Gagal menghapus akun."));
+              setConfirmDelete(false);
+            },
+          });
+        }}
+      />
+    </>
   );
 }
 
