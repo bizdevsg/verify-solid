@@ -48,8 +48,22 @@ export function DeviceCheck({ onReady }: { onReady: (ready: boolean) => void }) 
 
   return (
     <div className="space-y-4">
-      <div className="aspect-video overflow-hidden rounded-lg bg-black">
+      <div className="relative aspect-video overflow-hidden rounded-lg bg-black">
         <video ref={videoRef} autoPlay muted playsInline className="h-full w-full object-cover" />
+
+        {cameraStatus === "ready" && (
+          <>
+            {/* Face-positioning guide: helps customers hold the phone at eye
+                level and center their face before joining, instead of
+                staff having to correct an awkward camera angle live. */}
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+              <div className="h-[68%] aspect-[3/4] rounded-[50%] border-2 border-dashed border-gold/80" />
+            </div>
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-3 py-3 text-center text-xs font-medium text-white">
+              Posisikan wajah Anda di dalam bingkai — pegang HP sejajar mata
+            </div>
+          </>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-3 text-sm">
