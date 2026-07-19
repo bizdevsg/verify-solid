@@ -12,6 +12,9 @@ vi.mock("livekit-client", () => ({
     Connected: "connected",
     Disconnected: "disconnected",
   },
+  VideoPresets: {
+    h360: { resolution: { width: 640, height: 360 }, encoding: { maxBitrate: 450_000, maxFramerate: 24 } },
+  },
 }));
 
 vi.mock("@livekit/components-react", () => ({

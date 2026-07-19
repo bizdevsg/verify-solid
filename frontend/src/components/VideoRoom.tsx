@@ -11,8 +11,24 @@ import {
   useConnectionState,
   useTracks,
 } from "@livekit/components-react";
-import { ConnectionState, MediaDeviceFailure, Track } from "livekit-client";
+import { ConnectionState, MediaDeviceFailure, Track, VideoPresets } from "livekit-client";
 import { MeetingTimer } from "@/components/MeetingTimer";
+
+// Verification calls just need a clear-enough view of a face, not HD — capping
+// resolution/bitrate here keeps bandwidth demand low so the call stays smooth
+// on modest connections instead of the encoder fighting for bandwidth and
+// dropping frames (choppy video). adaptiveStream lets LiveKit lower quality
+// automatically under network pressure instead of stalling.
+const ROOM_OPTIONS = {
+  adaptiveStream: true,
+  dynacast: true,
+  videoCaptureDefaults: {
+    resolution: VideoPresets.h360.resolution,
+  },
+  publishDefaults: {
+    videoEncoding: VideoPresets.h360.encoding,
+  },
+};
 
 interface VideoRoomProps {
   url: string;
@@ -47,6 +63,7 @@ export function VideoRoom({ url, token, title, startedAt, onLeave, endAction }: 
     <LiveKitRoom
       serverUrl={url}
       token={token}
+      options={ROOM_OPTIONS}
       connect
       video
       audio
@@ -105,14 +122,18 @@ function RoomContent({
         )}
 
         {customerTrack ? (
-          <VideoTrack trackRef={customerTrack} className="h-full w-full object-cover" />
+          // object-contain: show the whole frame, never crop — cropping a
+          // face during identity verification is the one thing this view
+          // must not do. Letterboxing (black bars) is the acceptable
+          // trade-off when the camera's aspect ratio doesn't match.
+          <VideoTrack trackRef={customerTrack} className="h-full w-full object-contain" />
         ) : (
           <div className="flex h-full items-center justify-center text-zinc-400">Menunggu video nasabah...</div>
         )}
 
         <div className="absolute bottom-4 right-4 aspect-video w-32 overflow-hidden rounded-lg border-2 border-white/30 shadow-lg sm:w-48">
           {staffTrack ? (
-            <VideoTrack trackRef={staffTrack} className="h-full w-full object-cover" />
+            <VideoTrack trackRef={staffTrack} className="h-full w-full object-contain" />
           ) : (
             <div className="flex h-full items-center justify-center bg-charcoal-light text-xs text-zinc-400">Petugas</div>
           )}
