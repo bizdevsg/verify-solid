@@ -32,6 +32,7 @@ class Meeting extends Model
         'result',
         'recording_status',
         'recording_url',
+        'egress_id',
     ];
 
     protected static function booted(): void

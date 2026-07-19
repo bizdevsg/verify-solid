@@ -1,6 +1,7 @@
 #!/bin/sh
-# Renders infrastructure/livekit/livekit.prod.yaml.template -> livekit.prod.yaml,
-# substituting LIVEKIT_API_KEY / LIVEKIT_API_SECRET from the repo-root .env.
+# Renders infrastructure/livekit/livekit.prod.yaml.template -> livekit.prod.yaml
+# and egress.prod.yaml.template -> egress.prod.yaml, substituting
+# LIVEKIT_API_KEY / LIVEKIT_API_SECRET from the repo-root .env.
 # Re-run this whenever those values change. Uses plain sed (no gettext/envsubst
 # dependency).
 set -eu
@@ -25,4 +26,10 @@ sed \
     -e "s/\${LIVEKIT_API_SECRET}/${LIVEKIT_API_SECRET}/g" \
     infrastructure/livekit/livekit.prod.yaml.template > infrastructure/livekit/livekit.prod.yaml
 
+sed \
+    -e "s/\${LIVEKIT_API_KEY}/${LIVEKIT_API_KEY}/g" \
+    -e "s/\${LIVEKIT_API_SECRET}/${LIVEKIT_API_SECRET}/g" \
+    infrastructure/livekit/egress.prod.yaml.template > infrastructure/livekit/egress.prod.yaml
+
 echo "Rendered infrastructure/livekit/livekit.prod.yaml"
+echo "Rendered infrastructure/livekit/egress.prod.yaml"

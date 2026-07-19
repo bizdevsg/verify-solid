@@ -16,3 +16,4 @@ Thumbs.db
 # contain the real domain/keys, regenerate per-environment instead of committing
 infrastructure/nginx/prod.conf
 infrastructure/livekit/livekit.prod.yaml
+infrastructure/livekit/egress.prod.yaml

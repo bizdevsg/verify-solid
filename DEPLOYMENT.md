@@ -90,8 +90,8 @@ chmod +x infrastructure/certbot/init-letsencrypt.sh \
 ./infrastructure/certbot/init-letsencrypt.sh
 ```
 
-This renders the nginx and LiveKit configs from your `.env`, starts nginx with a throwaway
-certificate, requests the real one from Let's Encrypt for both `yourdomain.com` and
+This renders the nginx, LiveKit, and LiveKit Egress configs from your `.env`, starts nginx with a
+throwaway certificate, requests the real one from Let's Encrypt for both `yourdomain.com` and
 `livekit.yourdomain.com`, then reloads nginx onto it. It only needs to run once — renewal is
 handled automatically afterwards by the `certbot` service's background loop (checks twice a day,
 renews when within 30 days of expiry).
@@ -129,6 +129,14 @@ You'll be prompted for a password (input hidden). Use this account to log in at
 - Create a test customer + meeting, generate an invitation link, open it in a private window
 - Start the meeting as staff and join as the customer — video should connect (check the browser
   console for `wss://livekit.yourdomain.com` connecting successfully, not `ERR_CONNECTION_REFUSED`)
+- End the meeting, wait a few seconds, then refresh the meeting detail page — "Rekaman" should move
+  from "Sedang diproses..." to a working "Unduh Rekaman" link. If it stays on "Sedang diproses..."
+  or flips to "Gagal diproses", check the logs for the egress worker and the backend:
+  `docker compose -f docker-compose.yml -f docker-compose.prod.yml logs livekit-egress backend`
+  — a stuck `processing` status usually means LiveKit's webhook never reached
+  `http://nginx/api/v1/webhooks/livekit` (see `infrastructure/livekit/livekit.prod.yaml`'s
+  `webhook.urls`), while `failed` means the egress job itself errored (check the S3/MinIO
+  credentials in `backend/.env` match the root `.env`'s `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD`).
 
 ## Updating / redeploying
 
@@ -158,6 +166,10 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml exec db \
 Automate this with a cron job and copy the dumps off the server (a bind-mounted host directory or
 object storage — this repo doesn't set that up for you).
 
+Call recordings live separately, in the `minio_data` Docker volume. There's no retention/cleanup
+policy configured (see README "Known Limitations") — recordings accumulate indefinitely, so back up
+and/or prune `minio_data` according to whatever policy you land on.
+
 ## Certificate renewal
 
 Handled automatically by the `certbot` service (runs `certbot renew` every 12 hours in a loop and
@@ -178,12 +190,18 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml exec nginx nginx
 - [ ] First admin created via `php artisan app:create-user`, not the seeded `admin@example.local`
 - [ ] `DB_PASSWORD` / `DB_ROOT_PASSWORD` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` are unique,
       generated values — not copied from any `.example` file
-- [ ] Firewall only exposes 80, 443, 7880/7881, 50000-50100/udp, and SSH — not 3306 (MySQL) or
-      9000 (php-fpm), which should stay internal to the Docker network
+- [ ] Firewall only exposes 80, 443, 7880/7881, 50000-50100/udp, and SSH — not 3306 (MySQL),
+      9000 (php-fpm), or MinIO's 9000/9001, all of which should stay internal to the Docker network
+      (MinIO and MySQL/Redis have no host port mapping at all by default — nothing to double-check
+      there unless you added one yourself)
 - [ ] A backup routine exists for the `db_data` volume and runs somewhere other than this server
+- [ ] Recording resource usage has been sanity-checked for your VPS size — LiveKit Egress runs one
+      GStreamer process per active recording; on 2 vCPU/4GB this is fine for a handful of
+      simultaneous calls, but watch `docker stats` under real load
 
 ## Known limitations that carry over from the MVP
 
-Recording, WhatsApp/email delivery of invitation links, and multi-server/HA setups are out of
-scope here too — see the README's "Known Limitations" section. This guide covers a single-VPS
-deployment sized for an MVP's real traffic, not a highly-available production cluster.
+WhatsApp/email delivery of invitation links, multi-server/HA setups, and a recording
+retention/cleanup policy are out of scope here too — see the README's "Known Limitations" section.
+This guide covers a single-VPS deployment sized for an MVP's real traffic, not a highly-available
+production cluster.

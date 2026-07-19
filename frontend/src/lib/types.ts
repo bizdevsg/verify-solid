@@ -60,7 +60,7 @@ export interface Meeting {
   result: MeetingResult;
   staff_notes: string | null;
   recording_status: RecordingStatus;
-  recording_url: string | null;
+  recording_download_url?: string;
   invitation_expires_at: string | null;
   invitation_url?: string;
   events?: MeetingEvent[];

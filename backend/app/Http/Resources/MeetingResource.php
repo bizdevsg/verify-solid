@@ -31,9 +31,19 @@ class MeetingResource extends JsonResource
             'result' => $this->result->value,
             'staff_notes' => $this->staff_notes,
             'recording_status' => $this->recording_status->value,
-            'recording_url' => $this->when(
-                $request->user()?->isAdmin() || $request->user()?->id === $this->staff_id,
-                $this->recording_url
+            // Never a raw bucket/public URL — this points at our own
+            // authenticated download route, so every fetch re-checks the
+            // viewer's session instead of relying on a link that keeps
+            // working after it's copied or shared. Deliberately relative
+            // (no host): nginx serves the frontend and /api/* from the same
+            // origin, and a relative path can't drift out of sync with
+            // whatever origin the user is actually looking at (unlike
+            // config('app.url'), which is the backend container's own view
+            // of itself and isn't guaranteed to match the public origin).
+            'recording_download_url' => $this->when(
+                $this->recording_status->value === 'ready'
+                    && ($request->user()?->isAdmin() || $request->user()?->id === $this->staff_id),
+                fn () => "/api/v1/meetings/{$this->uuid}/recording"
             ),
             'invitation_expires_at' => $this->invitation_expires_at?->toIso8601String(),
             'invitation_url' => $this->when(

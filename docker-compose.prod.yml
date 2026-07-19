@@ -57,6 +57,17 @@ services:
     volumes:
       - ./infrastructure/livekit/livekit.prod.yaml:/etc/livekit.yaml:ro
 
+  minio:
+    restart: always
+
+  minio-init:
+    restart: "no"
+
+  livekit-egress:
+    restart: always
+    volumes:
+      - ./infrastructure/livekit/egress.prod.yaml:/etc/egress.yaml:ro
+
 volumes:
   certbot_conf:
   certbot_www:

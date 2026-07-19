@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Enums\MeetingResult;
 use App\Enums\MeetingStatus;
 use App\Enums\ParticipantType;
+use App\Enums\RecordingStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Meeting\MeetingNotesRequest;
 use App\Http\Requests\Meeting\StoreMeetingRequest;
@@ -14,6 +15,7 @@ use App\Models\Customer;
 use App\Models\Meeting;
 use App\Services\LiveKitService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 
 class MeetingController extends Controller
 {
@@ -143,6 +145,13 @@ class MeetingController extends Controller
 
         $meeting->status = MeetingStatus::Active;
         $meeting->started_at ??= now();
+
+        if ($meeting->recording_status !== RecordingStatus::Recording) {
+            $egressId = $this->liveKit->startRecording($meeting);
+            $meeting->egress_id = $egressId;
+            $meeting->recording_status = $egressId ? RecordingStatus::Recording : RecordingStatus::Failed;
+        }
+
         $meeting->save();
 
         $meeting->participants()->updateOrCreate(
@@ -152,6 +161,9 @@ class MeetingController extends Controller
 
         $meeting->recordEvent('meeting_started', 'Meeting dimulai oleh '.$request->user()->name);
         $meeting->recordEvent('staff_joined', $request->user()->name.' bergabung.');
+        if ($meeting->recording_status === RecordingStatus::Recording) {
+            $meeting->recordEvent('recording_started', 'Perekaman video dimulai.');
+        }
 
         $meeting->load(['customer', 'staff']);
 
@@ -177,6 +189,12 @@ class MeetingController extends Controller
         $meeting->ended_at = now();
         $meeting->duration_seconds = $meeting->started_at ? $meeting->ended_at->diffInSeconds($meeting->started_at, true) : 0;
         $meeting->status = MeetingStatus::Completed;
+
+        if ($meeting->recording_status === RecordingStatus::Recording && $meeting->egress_id) {
+            $this->liveKit->stopEgress($meeting->egress_id);
+            $meeting->recording_status = RecordingStatus::Processing;
+        }
+
         $meeting->save();
 
         $this->liveKit->closeRoom($meeting->room_name);
@@ -196,6 +214,12 @@ class MeetingController extends Controller
         }
 
         $meeting->status = MeetingStatus::Cancelled;
+
+        if ($meeting->recording_status === RecordingStatus::Recording && $meeting->egress_id) {
+            $this->liveKit->stopEgress($meeting->egress_id);
+            $meeting->recording_status = RecordingStatus::Processing;
+        }
+
         $meeting->save();
 
         $this->liveKit->closeRoom($meeting->room_name);
@@ -236,6 +260,30 @@ class MeetingController extends Controller
             'identity' => $identity,
             'room_name' => $meeting->room_name,
         ]);
+    }
+
+    /**
+     * Streams the recording through our own authenticated route rather than
+     * handing out a signed S3/MinIO URL — every byte requested still goes
+     * through `authorize('view', ...)`, so there's never a link that works
+     * without a valid staff/admin session.
+     */
+    public function downloadRecording(Meeting $meeting)
+    {
+        $this->authorize('view', $meeting);
+
+        if ($meeting->recording_status !== RecordingStatus::Ready) {
+            return $this->error('Rekaman belum tersedia.', 'RECORDING_NOT_READY');
+        }
+
+        $disk = Storage::disk('recordings');
+        $key = $this->liveKit->recordingObjectKey($meeting);
+
+        if (! $disk->exists($key)) {
+            return $this->error('File rekaman tidak ditemukan.', 'RECORDING_FILE_MISSING');
+        }
+
+        return $disk->download($key, "{$meeting->meeting_code}.mp4");
     }
 
     public function regenerateInvitation(Request $request, Meeting $meeting)

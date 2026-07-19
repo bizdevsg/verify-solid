@@ -19,6 +19,7 @@ import {
 } from "@/hooks/useMeetings";
 import { formatDateTime, formatDuration } from "@/lib/format";
 import { getApiErrorMessage } from "@/lib/api";
+import { Meeting } from "@/lib/types";
 
 export default function MeetingDetailPage({ params }: { params: Promise<{ uuid: string }> }) {
   const { uuid } = use(params);
@@ -78,10 +79,8 @@ export default function MeetingDetailPage({ params }: { params: Promise<{ uuid: 
                 </div>
                 <div>
                   <dt className="text-xs text-zinc-400">Rekaman</dt>
-                  <dd className="text-zinc-500">
-                    {meeting.recording_status === "ready" && meeting.recording_url
-                      ? "Tersedia"
-                      : "Belum tersedia"}
+                  <dd className="text-zinc-700">
+                    <RecordingStatusValue meeting={meeting} />
                   </dd>
                 </div>
               </dl>
@@ -219,4 +218,27 @@ export default function MeetingDetailPage({ params }: { params: Promise<{ uuid: 
       />
     </>
   );
+}
+
+const recordingStatusLabels: Record<Meeting["recording_status"], string> = {
+  none: "Tidak direkam",
+  recording: "Sedang merekam...",
+  processing: "Sedang diproses...",
+  ready: "Tersedia",
+  failed: "Gagal diproses",
+};
+
+function RecordingStatusValue({ meeting }: { meeting: Meeting }) {
+  if (meeting.recording_status === "ready" && meeting.recording_download_url) {
+    return (
+      <a
+        href={meeting.recording_download_url}
+        className="inline-flex items-center gap-1 font-medium text-gold hover:underline"
+      >
+        Unduh Rekaman
+      </a>
+    );
+  }
+
+  return <span className="text-zinc-500">{recordingStatusLabels[meeting.recording_status]}</span>;
 }

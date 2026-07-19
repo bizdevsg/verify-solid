@@ -31,9 +31,17 @@ services:
       - ./backend/.env
     environment:
       DB_HOST: db
+      DB_DATABASE: ${DB_DATABASE:-solid_video_verification}
+      DB_USERNAME: ${DB_USERNAME:-solid}
+      DB_PASSWORD: ${DB_PASSWORD:-solid_secret}
       REDIS_HOST: redis
       LIVEKIT_HOST: http://livekit:7880
       LIVEKIT_URL: ws://localhost:7880
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin_secret}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_BUCKET: recordings
+      MINIO_REGION: us-east-1
     depends_on:
       db:
         condition: service_healthy
@@ -81,6 +89,58 @@ services:
     networks:
       - solid-video-verification
 
+  # Recording storage for LiveKit Egress. Call recordings must not live in
+  # MySQL or behind a public URL (see backend/config/filesystems.php
+  # "recordings" disk) — MinIO gives us an S3-compatible bucket the backend
+  # streams from through its own authenticated download endpoint.
+  # Same as db/redis above: no host port mapping. The backend and egress
+  # containers reach it over the internal docker network at minio:9000 —
+  # nothing outside the compose network needs a direct connection.
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin_secret}
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - solid-video-verification
+
+  # One-shot: creates the "recordings" bucket if it doesn't exist yet, then
+  # exits. MinIO never auto-creates buckets on its own.
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      sh -c "
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin_secret} &&
+      mc mb -p local/recordings
+      "
+    networks:
+      - solid-video-verification
+
+  livekit-egress:
+    image: livekit/egress:latest
+    restart: unless-stopped
+    environment:
+      EGRESS_CONFIG_FILE: /etc/egress.yaml
+    volumes:
+      - ./infrastructure/livekit/egress.yaml:/etc/egress.yaml:ro
+    depends_on:
+      - redis
+      - livekit
+    networks:
+      - solid-video-verification
+
 networks:
   solid-video-verification:
     driver: bridge
@@ -88,3 +148,4 @@ networks:
 volumes:
   db_data:
   backend_storage:
+  minio_data:

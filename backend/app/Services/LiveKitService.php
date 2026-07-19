@@ -4,11 +4,15 @@ namespace App\Services;
 
 use Agence104\LiveKit\AccessToken;
 use Agence104\LiveKit\AccessTokenOptions;
+use Agence104\LiveKit\EgressServiceClient;
+use Agence104\LiveKit\EncodedOutputs;
 use Agence104\LiveKit\RoomCreateOptions;
 use Agence104\LiveKit\RoomServiceClient;
 use App\Models\Meeting;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Livekit\EncodedFileOutput;
+use Livekit\S3Upload;
 
 class LiveKitService
 {
@@ -93,6 +97,69 @@ class LiveKitService
         $token->setGrant($grant);
 
         return $token->toJwt();
+    }
+
+    /**
+     * Records only the customer's audio+video via Participant Egress, not a
+     * Room Composite (headless-Chrome) render of both parties — the modest
+     * VPS this runs on doesn't have the CPU/RAM headroom for that, and the
+     * verification review only needs the customer's face on camera anyway.
+     * Failure is non-fatal: a recording that never starts shouldn't stop
+     * staff from doing the actual verification call.
+     */
+    public function startRecording(Meeting $meeting): ?string
+    {
+        try {
+            $client = new EgressServiceClient($this->host, $this->apiKey, $this->apiSecret);
+
+            $fileOutput = new EncodedFileOutput([
+                'filepath' => $this->recordingObjectKey($meeting),
+                's3' => new S3Upload([
+                    'access_key' => (string) config('filesystems.disks.recordings.key'),
+                    'secret' => (string) config('filesystems.disks.recordings.secret'),
+                    'region' => (string) config('filesystems.disks.recordings.region'),
+                    'endpoint' => (string) config('filesystems.disks.recordings.endpoint'),
+                    'bucket' => (string) config('filesystems.disks.recordings.bucket'),
+                    'force_path_style' => true,
+                ]),
+            ]);
+
+            // Wrapping in EncodedOutputs (rather than passing $fileOutput
+            // bare) matters: the SDK's startParticipantEgress() otherwise
+            // also stuffs the raw EncodedFileOutput into a `file` property
+            // that ParticipantEgressRequest's current proto schema doesn't
+            // have (only the repeated `file_outputs`), throwing "Invalid
+            // message property: file". The EncodedOutputs branch skips that
+            // broken assignment and only populates `file_outputs`.
+            $output = new EncodedOutputs(['file' => $fileOutput]);
+
+            $info = $client->startParticipantEgress(
+                $meeting->room_name,
+                $this->customerIdentity($meeting),
+                $output
+            );
+
+            return $info->getEgressId();
+        } catch (\Throwable $e) {
+            Log::warning('LiveKit startParticipantEgress failed', ['meeting' => $meeting->uuid, 'error' => $e->getMessage()]);
+
+            return null;
+        }
+    }
+
+    public function stopEgress(string $egressId): void
+    {
+        try {
+            $client = new EgressServiceClient($this->host, $this->apiKey, $this->apiSecret);
+            $client->stopEgress($egressId);
+        } catch (\Throwable $e) {
+            Log::warning('LiveKit stopEgress failed', ['egress_id' => $egressId, 'error' => $e->getMessage()]);
+        }
+    }
+
+    public function recordingObjectKey(Meeting $meeting): string
+    {
+        return "{$meeting->uuid}.mp4";
     }
 
     public function staffIdentity(Meeting $meeting): string

@@ -47,10 +47,17 @@ return [
             'report' => false,
         ],
 
+        // Call recordings must never live in MySQL or be publicly reachable —
+        // they land in this S3-compatible (MinIO) bucket, accessed only via
+        // the app's own authenticated download endpoint.
         'recordings' => [
-            'driver' => 'local',
-            'root' => storage_path('app/private/recordings'),
-            'serve' => false,
+            'driver' => 's3',
+            'key' => env('MINIO_ACCESS_KEY'),
+            'secret' => env('MINIO_SECRET_KEY'),
+            'region' => env('MINIO_REGION', 'us-east-1'),
+            'bucket' => env('MINIO_BUCKET', 'recordings'),
+            'endpoint' => env('MINIO_ENDPOINT'),
+            'use_path_style_endpoint' => true,
             'throw' => false,
             'report' => false,
         ],

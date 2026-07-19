@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\CustomerController;
 use App\Http\Controllers\Api\V1\DashboardController;
+use App\Http\Controllers\Api\V1\LiveKitWebhookController;
 use App\Http\Controllers\Api\V1\MeetingController;
 use App\Http\Controllers\Api\V1\Public\JoinController;
 use App\Http\Controllers\Api\V1\UserController;
@@ -20,6 +21,10 @@ Route::prefix('public')->middleware('throttle:60,1')->group(function () {
     Route::post('/join/{token}/join-token', [JoinController::class, 'joinToken']);
 });
 
+// Called by the LiveKit server itself, not a browser — no Sanctum session.
+// Trust comes from the signed JWT the controller verifies internally.
+Route::post('/webhooks/livekit', [LiveKitWebhookController::class, 'handle'])->middleware('throttle:120,1');
+
 Route::middleware(['auth:sanctum', 'role:admin,staff'])->group(function () {
     Route::get('/dashboard', [DashboardController::class, 'index']);
 
@@ -35,6 +40,7 @@ Route::middleware(['auth:sanctum', 'role:admin,staff'])->group(function () {
     Route::post('/meetings/{meeting}/cancel', [MeetingController::class, 'cancel']);
     Route::post('/meetings/{meeting}/join-token', [MeetingController::class, 'joinToken']);
     Route::post('/meetings/{meeting}/notes', [MeetingController::class, 'notes']);
+    Route::get('/meetings/{meeting}/recording', [MeetingController::class, 'downloadRecording']);
     Route::post('/meetings/{meeting}/regenerate-invitation', [MeetingController::class, 'regenerateInvitation']);
 
     Route::middleware('role:admin')->group(function () {

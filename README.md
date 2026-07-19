@@ -3,8 +3,8 @@
 A lightweight one-to-one video meeting platform for Solid Gold staff to verify customer identity over
 video, similar in spirit to Zoom but scoped to a single use case: **staff ↔ customer identity verification**.
 
-This is an MVP. It intentionally does not include group calls, chat, screen sharing, recording pipelines,
-or compliance workflow features beyond what's listed below.
+This is an MVP. It intentionally does not include group calls, chat, screen sharing, or compliance
+workflow features beyond what's listed below.
 
 ## Features
 
@@ -17,9 +17,12 @@ or compliance workflow features beyond what's listed below.
 - Customer join flow with no login required: invitation → name confirmation → camera/mic check →
   waiting room → video call → completion page
 - One-to-one video calls via LiveKit (`livekit-client` + `@livekit/components-react`)
+- Call recording: the customer's audio+video is recorded via LiveKit Egress, stored in MinIO
+  (S3-compatible), and downloadable only through an authenticated Laravel route — never a public URL
 - Meeting notes, verification result, and history
-- Meeting event timeline (invitation opened, customer waiting, meeting started/ended, etc.)
-- Docker Compose environment: nginx, frontend, backend, MySQL, Redis, LiveKit
+- Meeting event timeline (invitation opened, customer waiting, meeting started/ended, recording
+  started/ready/failed, etc.)
+- Docker Compose environment: nginx, frontend, backend, MySQL, Redis, LiveKit, LiveKit Egress, MinIO
 
 ## Technology Stack
 
@@ -30,7 +33,7 @@ React Hook Form, Zod, `@livekit/components-react`
 
 **Video:** LiveKit (self-hosted via Docker)
 
-**Infra:** Docker Compose, nginx, MySQL, Redis
+**Infra:** Docker Compose, nginx, MySQL, Redis, MinIO (recording storage)
 
 ## Folder Structure
 
@@ -40,9 +43,10 @@ React Hook Form, Zod, `@livekit/components-react`
 ├── frontend/                 Next.js app (src/app, src/components, src/hooks, src/lib)
 ├── infrastructure/
 │   ├── nginx/default.conf    Reverse proxy: /api + /sanctum → backend, everything else → frontend
-│   └── livekit/livekit.yaml  LiveKit server config (dev keys)
+│   ├── livekit/livekit.yaml  LiveKit server config (dev keys, includes webhook: for recording)
+│   └── livekit/egress.yaml   LiveKit Egress worker config (dev keys)
 ├── docker-compose.yml
-└── .env.example              Root compose env (DB credentials, LiveKit dev keys)
+└── .env.example              Root compose env (DB credentials, LiveKit dev keys, MinIO credentials)
 ```
 
 ## Local Installation (without Docker)
@@ -92,7 +96,10 @@ docker run --rm -p 7880:7880 -p 7881:7881 -p 50000-50100:50000-50100/udp \
 ```
 
 Make sure `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` in `backend/.env` match the `keys:` section of
-`infrastructure/livekit/livekit.yaml`.
+`infrastructure/livekit/livekit.yaml`. Recording needs LiveKit Egress + MinIO too, which is
+realistically only practical via the full Docker Compose stack below (Egress needs its own worker
+process, and the webhook that flips a recording to "ready" needs a reachable callback URL) — running
+LiveKit standalone like this gets you calls, but not recordings.
 
 ## Docker (local, self-hosted try-out — no HTTPS)
 
@@ -107,7 +114,12 @@ The app is then available at `http://localhost` (nginx routes `/api/*` and `/san
 Laravel backend, everything else to the Next.js frontend). LiveKit's signaling/media ports
 (`7880`, `7881`, `50000-50100/udp`) are also published on the host.
 
-To stop: `docker compose down` (add `-v` to also drop the MySQL data volume).
+Recording works out of the box with this full stack: `minio-init` creates the `recordings` bucket
+automatically on first start, `livekit-egress` picks up jobs from Redis, and the webhook route is
+already configured in `infrastructure/livekit/livekit.yaml`. MinIO itself has no host port mapping
+(same as MySQL/Redis) — it's only reachable from inside the compose network.
+
+To stop: `docker compose down` (add `-v` to also drop the MySQL and MinIO data volumes).
 
 **Deploying to a real production server (domain + HTTPS + hardened config)?** See
 [DEPLOYMENT.md](DEPLOYMENT.md) — don't reuse the seeded demo accounts or dev LiveKit keys there.
@@ -122,6 +134,7 @@ for the full list. Notable ones:
 | `SANCTUM_STATEFUL_DOMAINS` | backend | Origins allowed to use cookie-based (SPA) auth |
 | `FRONTEND_URL` | backend | Used to build invitation links returned by the API |
 | `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` / `LIVEKIT_HOST` / `LIVEKIT_URL` | backend | Server-side token signing + room management. **Never exposed to the browser.** |
+| `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` / `MINIO_ENDPOINT` / `MINIO_BUCKET` | backend | Recording storage (the `recordings` disk). **Never exposed to the browser.** |
 | `NEXT_PUBLIC_API_URL` | frontend | Backend root URL the browser talks to |
 
 ## Database Migration & Seeder
@@ -180,7 +193,11 @@ composer test
 Covers: login (success/failure/inactive account), unauthorized dashboard access, customer CRUD,
 customer identity masking, meeting creation/start/end/cancel, staff-scoped authorization
 (a staff member cannot view or act on another staff member's meeting), LiveKit join-token
-authorization, invitation validity (valid/invalid/expired/cancelled), and the full public join flow.
+authorization, invitation validity (valid/invalid/expired/cancelled), the full public join flow, and
+recording (egress starts on meeting start and survives egress-start failure, egress stops and marks
+`processing` on meeting end, the signed LiveKit webhook flips status to `ready`/`failed`, an invalid
+webhook signature is rejected, and the download route enforces `ready` status + staff/admin
+ownership + file-presence).
 
 Frontend:
 
@@ -197,14 +214,38 @@ validation/submission, meeting form (including role-based staff selector visibil
 permission check (granted/denied), waiting room content, video room connection-error state, and
 meeting notes save flow.
 
+## Recording
+
+Starting a meeting kicks off a LiveKit **Participant Egress** job scoped to the customer's identity
+only — not a Room Composite (headless-Chrome) recording of both staff and customer. That choice is
+deliberate: Room Composite egress renders the call through a Chrome instance per recording, which is
+real CPU/RAM overhead a small VPS (e.g. 2 vCPU / 4 GB RAM) doesn't have much room for. Participant
+Egress just muxes the customer's existing audio/video tracks straight to a file — the verification
+review only needs the customer's face on camera anyway.
+
+Flow:
+
+1. `MeetingController::start()` calls `LiveKitService::startRecording()`, which starts the egress job
+   and stores the returned `egress_id` on the meeting; `recording_status` becomes `recording`. If
+   starting the egress fails for any reason, that's logged and `recording_status` becomes `failed` —
+   it never blocks the meeting itself from starting.
+2. `MeetingController::end()`/`cancel()` call `LiveKitService::stopEgress()`; `recording_status`
+   becomes `processing`.
+3. LiveKit calls back to `POST /api/v1/webhooks/livekit` (signature-verified via
+   `Agence104\LiveKit\WebhookReceiver`, no Sanctum session involved — LiveKit is the caller, not a
+   browser) once the file finishes uploading. On `egress_ended`, `recording_status` becomes `ready`
+   (or `failed`) and the object key is stored in `recording_url`.
+4. Staff/admin download the file via `GET /api/v1/meetings/{meeting}/recording`
+   (`MeetingController::downloadRecording()`), which streams straight from the MinIO bucket through
+   Laravel's own auth check — there is no signed bucket URL or public link at any point, matching the
+   original spec's requirement.
+
+The recording never touches MySQL — only status/metadata (`recording_status`, `recording_url`,
+`egress_id`) live there; the actual file lives in the `recordings` MinIO bucket
+(`backend/config/filesystems.php`).
+
 ## Known Limitations
 
-- **Recording is not implemented.** The database fields (`recording_status`, `recording_url`) and
-  the `RecordingStatus` enum exist and are wired through the API/UI ("Belum tersedia" is shown on the
-  meeting detail page), but there is no LiveKit Egress or MinIO integration yet. Adding it later means:
-  start an Egress job when the meeting starts, stop it when the meeting ends, store only the file
-  path/metadata in MySQL, store the actual file in private object storage (e.g. MinIO/S3), and serve
-  it only through an authenticated Laravel route — never a public URL.
 - **No WhatsApp/email delivery of invitation links.** Staff must copy and send the link manually.
 - **Single MySQL server, no queue workers required.** Redis is included in Docker Compose for parity
   with the requested stack, but nothing in the app currently requires it (cache/session/queue all use
@@ -212,5 +253,8 @@ meeting notes save flow.
 - **"Copy invitation link" always rotates the token.** Because only a hash of the invitation token is
   stored (not the plaintext), there's no way to redisplay a previously issued link — clicking
   "Buat Link Undangan" again issues a new one and invalidates the old one.
-- **No automated LiveKit Egress/MinIO services in `docker-compose.yml`** since recording isn't
-  implemented; only `livekit-server` itself is included.
+- **No recording retention/cleanup policy yet.** Recordings accumulate in the MinIO bucket
+  indefinitely; add a scheduled job (e.g. delete recordings past a retention window) once a policy is
+  decided.
+- **Recording adds real CPU/RAM load** (LiveKit Egress runs GStreamer per active recording). On a
+  2 vCPU/4 GB VPS this is fine for a handful of concurrent calls, but watch server load if usage grows.

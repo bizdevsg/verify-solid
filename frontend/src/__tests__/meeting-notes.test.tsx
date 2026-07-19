@@ -19,7 +19,6 @@ const baseMeeting: Meeting = {
   result: "pending",
   staff_notes: null,
   recording_status: "none",
-  recording_url: null,
   invitation_expires_at: null,
 };
 

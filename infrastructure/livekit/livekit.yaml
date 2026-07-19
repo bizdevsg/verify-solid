@@ -14,5 +14,9 @@ room:
   auto_create: true
   empty_timeout: 300
   departure_timeout: 20
+webhook:
+  api_key: devkey
+  urls:
+    - http://nginx/api/v1/webhooks/livekit
 logging:
   level: info
