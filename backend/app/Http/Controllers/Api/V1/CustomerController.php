@@ -72,6 +72,17 @@ class CustomerController extends Controller
     {
         $this->authorize('delete', $customer);
 
+        // meetings.customer_id cascades on delete — hard-deleting a customer
+        // with meeting history would silently wipe those verification
+        // records too. Block it; there's no "deactivate" concept for
+        // customers, so the admin just has to keep the record.
+        if ($customer->meetings()->exists()) {
+            return $this->error(
+                'Nasabah ini memiliki riwayat meeting dan tidak dapat dihapus.',
+                'CUSTOMER_HAS_MEETINGS'
+            );
+        }
+
         $customer->delete();
 
         return $this->success(null, 'Nasabah berhasil dihapus.');

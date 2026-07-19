@@ -2,17 +2,26 @@
 
 import { use, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { TopNavbar } from "@/components/TopNavbar";
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
 import { MeetingTable } from "@/components/MeetingTable";
-import { useCustomer } from "@/hooks/useCustomers";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { useAuth } from "@/lib/auth-context";
+import { useCustomer, useDeleteCustomer } from "@/hooks/useCustomers";
 import { formatDate } from "@/lib/format";
+import { getApiErrorMessage } from "@/lib/api";
 
 export default function CustomerDetailPage({ params }: { params: Promise<{ uuid: string }> }) {
   const { uuid } = use(params);
+  const router = useRouter();
+  const { user } = useAuth();
   const { data: customer, isLoading, isError, refetch } = useCustomer(uuid);
+  const deleteCustomer = useDeleteCustomer();
   const [showIdentity, setShowIdentity] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   return (
     <>
@@ -20,6 +29,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ uuid:
       <main className="flex-1 space-y-6 p-4 md:p-6">
         {isLoading && <LoadingState />}
         {isError && <ErrorState onRetry={() => refetch()} />}
+        {deleteError && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{deleteError}</p>}
 
         {customer && (
           <>
@@ -45,12 +55,25 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ uuid:
                   <Info label="Catatan" value={customer.notes || "-"} />
                 </dl>
               </div>
-              <Link
-                href={`/customers/${customer.uuid}/edit`}
-                className="rounded-md border border-gray-border px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-gray-light"
-              >
-                Edit Data
-              </Link>
+              <div className="flex gap-2">
+                <Link
+                  href={`/customers/${customer.uuid}/edit`}
+                  className="rounded-md border border-gray-border px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-gray-light"
+                >
+                  Edit Data
+                </Link>
+                {user?.role === "admin" && (
+                  <button
+                    onClick={() => {
+                      setDeleteError(null);
+                      setConfirmDelete(true);
+                    }}
+                    className="rounded-md border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+                  >
+                    Hapus
+                  </button>
+                )}
+              </div>
             </div>
 
             <section>
@@ -65,6 +88,25 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ uuid:
           </>
         )}
       </main>
+
+      <ConfirmDialog
+        open={confirmDelete}
+        title={`Hapus Data ${customer?.full_name}?`}
+        description="Tindakan ini tidak dapat dibatalkan. Nasabah yang punya riwayat meeting tidak bisa dihapus."
+        confirmLabel="Ya, Hapus"
+        destructive
+        isLoading={deleteCustomer.isPending}
+        onCancel={() => setConfirmDelete(false)}
+        onConfirm={() => {
+          deleteCustomer.mutate(uuid, {
+            onSuccess: () => router.push("/customers"),
+            onError: (err) => {
+              setDeleteError(getApiErrorMessage(err, "Gagal menghapus nasabah."));
+              setConfirmDelete(false);
+            },
+          });
+        }}
+      />
     </>
   );
 }

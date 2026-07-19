@@ -83,6 +83,18 @@ class CustomerTest extends TestCase
         $this->assertDatabaseMissing('customers', ['id' => $customer->id]);
     }
 
+    public function test_admin_cannot_delete_customer_with_meeting_history(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $customer = Customer::factory()->create();
+        \App\Models\Meeting::factory()->create(['customer_id' => $customer->id]);
+
+        $response = $this->actingAs($admin)->deleteJson("/api/v1/customers/{$customer->uuid}");
+
+        $response->assertStatus(422)->assertJsonPath('error.code', 'CUSTOMER_HAS_MEETINGS');
+        $this->assertDatabaseHas('customers', ['id' => $customer->id]);
+    }
+
     public function test_customer_list_supports_search(): void
     {
         $staff = User::factory()->create();
