@@ -121,7 +121,14 @@ function RoomContent({
         </span>
       </header>
 
-      <div className="relative flex-1 bg-charcoal p-2 sm:p-4">
+      {/* min-h-0 overrides the flex item's default min-height:auto. Without
+          it, once a real <video> element mounts (with its own intrinsic
+          size), flexbox lets its content push this item taller than the
+          available space instead of clipping it — that's what pushed the
+          footer and PiP tile off-screen only once the customer's camera
+          track actually appeared (the "waiting" placeholder has no
+          intrinsic size, so it never triggered this). */}
+      <div className="relative min-h-0 flex-1 bg-charcoal p-2 sm:p-4">
         {(mediaError || roomError) && (
           <div className="absolute inset-x-2 top-2 z-20 rounded-md bg-red-600/90 px-4 py-2 text-center text-sm sm:inset-x-4 sm:top-4">
             {mediaError || roomError}
