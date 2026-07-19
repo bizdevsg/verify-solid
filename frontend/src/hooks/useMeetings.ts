@@ -76,6 +76,19 @@ function useMeetingAction(uuid: string, action: string) {
   });
 }
 
+export function useDeleteMeeting(uuid: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      await api.delete(`/meetings/${uuid}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["meetings"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+  });
+}
+
 export const useStartMeeting = (uuid: string) => useMeetingAction(uuid, "start");
 export const useCancelMeeting = (uuid: string) => useMeetingAction(uuid, "cancel");
 export const useEndMeeting = (uuid: string) => useMeetingAction(uuid, "end");

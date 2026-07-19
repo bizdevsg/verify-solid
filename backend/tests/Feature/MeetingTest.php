@@ -165,4 +165,48 @@ class MeetingTest extends TestCase
 
         $response->assertStatus(422)->assertJsonPath('error.code', 'MEETING_NOT_CANCELLABLE');
     }
+
+    public function test_admin_can_delete_a_cancelled_meeting(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $meeting = Meeting::factory()->create(['status' => MeetingStatus::Cancelled]);
+
+        $response = $this->actingAs($admin)->deleteJson("/api/v1/meetings/{$meeting->uuid}");
+
+        $response->assertOk();
+        $this->assertDatabaseMissing('meetings', ['id' => $meeting->id]);
+    }
+
+    public function test_admin_cannot_delete_a_completed_meeting(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $meeting = Meeting::factory()->completed()->create();
+
+        $response = $this->actingAs($admin)->deleteJson("/api/v1/meetings/{$meeting->uuid}");
+
+        $response->assertStatus(422)->assertJsonPath('error.code', 'MEETING_NOT_DELETABLE');
+        $this->assertDatabaseHas('meetings', ['id' => $meeting->id]);
+    }
+
+    public function test_admin_cannot_delete_an_active_meeting(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $meeting = Meeting::factory()->create(['status' => MeetingStatus::Active, 'started_at' => now()]);
+
+        $response = $this->actingAs($admin)->deleteJson("/api/v1/meetings/{$meeting->uuid}");
+
+        $response->assertStatus(422)->assertJsonPath('error.code', 'MEETING_NOT_DELETABLE');
+        $this->assertDatabaseHas('meetings', ['id' => $meeting->id]);
+    }
+
+    public function test_staff_cannot_delete_meeting_even_if_cancelled(): void
+    {
+        $staff = User::factory()->create();
+        $meeting = Meeting::factory()->create(['staff_id' => $staff->id, 'status' => MeetingStatus::Cancelled]);
+
+        $response = $this->actingAs($staff)->deleteJson("/api/v1/meetings/{$meeting->uuid}");
+
+        $response->assertStatus(403);
+        $this->assertDatabaseHas('meetings', ['id' => $meeting->id]);
+    }
 }

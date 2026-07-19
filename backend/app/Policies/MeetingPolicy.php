@@ -31,4 +31,9 @@ class MeetingPolicy
     {
         return $user->isAdmin() || $meeting->staff_id === $user->id;
     }
+
+    public function delete(User $user, Meeting $meeting): bool
+    {
+        return $user->isAdmin();
+    }
 }

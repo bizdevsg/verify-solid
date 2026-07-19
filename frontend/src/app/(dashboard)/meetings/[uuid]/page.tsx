@@ -12,6 +12,7 @@ import { CustomerSummary } from "@/components/CustomerSummary";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import {
   useCancelMeeting,
+  useDeleteMeeting,
   useMeeting,
   useRegenerateInvitation,
   useSaveMeetingNotes,
@@ -20,24 +21,33 @@ import {
 import { formatDateTime, formatDuration } from "@/lib/format";
 import { getApiErrorMessage } from "@/lib/api";
 import { Meeting } from "@/lib/types";
+import { useAuth } from "@/lib/auth-context";
 
 export default function MeetingDetailPage({ params }: { params: Promise<{ uuid: string }> }) {
   const { uuid } = use(params);
   const router = useRouter();
+  const { user } = useAuth();
   const { data: meeting, isLoading, isError, refetch } = useMeeting(uuid, {
     refetchInterval: 5000,
   });
   const startMeeting = useStartMeeting(uuid);
   const cancelMeeting = useCancelMeeting(uuid);
+  const deleteMeeting = useDeleteMeeting(uuid);
   const saveNotes = useSaveMeetingNotes(uuid);
   const regenerateInvitation = useRegenerateInvitation(uuid);
 
   const [invitationUrl, setInvitationUrl] = useState<string | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const canManage = meeting && !["completed", "cancelled", "expired"].includes(meeting.status);
+  // Deleting a completed/active/waiting meeting would erase a real
+  // verification record (or a call in progress) — only scheduling
+  // mistakes and already-cancelled/expired entries are eligible, and only
+  // an admin can do it.
+  const canDelete = meeting && user?.role === "admin" && !["waiting", "active", "completed"].includes(meeting.status);
 
   return (
     <>
@@ -146,6 +156,26 @@ export default function MeetingDetailPage({ params }: { params: Promise<{ uuid: 
                       Batalkan
                     </button>
                   )}
+
+                  {canDelete && (
+                    <button
+                      onClick={() => setConfirmDelete(true)}
+                      className="rounded-md border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+                    >
+                      Hapus Meeting
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {!canManage && canDelete && (
+                <div className="mt-2 flex flex-wrap gap-2 border-t border-gray-border pt-4">
+                  <button
+                    onClick={() => setConfirmDelete(true)}
+                    className="rounded-md border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+                  >
+                    Hapus Meeting
+                  </button>
                 </div>
               )}
 
@@ -212,6 +242,25 @@ export default function MeetingDetailPage({ params }: { params: Promise<{ uuid: 
             onError: (err) => {
               setActionError(getApiErrorMessage(err, "Gagal membatalkan meeting."));
               setConfirmCancel(false);
+            },
+          });
+        }}
+      />
+
+      <ConfirmDialog
+        open={confirmDelete}
+        title="Hapus Meeting Ini?"
+        description="Tindakan ini tidak dapat dibatalkan. Meeting yang sudah selesai atau sedang berlangsung tidak dapat dihapus."
+        confirmLabel="Ya, Hapus"
+        destructive
+        isLoading={deleteMeeting.isPending}
+        onCancel={() => setConfirmDelete(false)}
+        onConfirm={() => {
+          deleteMeeting.mutate(undefined, {
+            onSuccess: () => router.push("/meetings"),
+            onError: (err) => {
+              setActionError(getApiErrorMessage(err, "Gagal menghapus meeting."));
+              setConfirmDelete(false);
             },
           });
         }}

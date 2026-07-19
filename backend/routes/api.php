@@ -49,5 +49,6 @@ Route::middleware(['auth:sanctum', 'role:admin,staff'])->group(function () {
         Route::patch('/users/{user}', [UserController::class, 'update']);
         Route::delete('/users/{user}', [UserController::class, 'destroy']);
         Route::delete('/customers/{customer}', [CustomerController::class, 'destroy']);
+        Route::delete('/meetings/{meeting}', [MeetingController::class, 'destroy']);
     });
 });

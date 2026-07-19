@@ -205,6 +205,30 @@ class MeetingController extends Controller
         return $this->success(new MeetingResource($meeting), 'Meeting berhasil diakhiri.');
     }
 
+    /**
+     * Only non-completed, non-in-progress meetings can be hard-deleted.
+     * Completed meetings are the actual verification record (result,
+     * notes, recording) and active/waiting ones are a live call in
+     * progress — neither should ever be permanently erasable. Admins use
+     * "Batalkan" for those; delete is for cleaning up scheduling mistakes
+     * or old cancelled/expired entries.
+     */
+    public function destroy(Meeting $meeting)
+    {
+        $this->authorize('delete', $meeting);
+
+        if (in_array($meeting->status, [MeetingStatus::Active, MeetingStatus::Waiting, MeetingStatus::Completed], true)) {
+            return $this->error(
+                'Meeting yang sedang berlangsung atau sudah selesai tidak dapat dihapus.',
+                'MEETING_NOT_DELETABLE'
+            );
+        }
+
+        $meeting->delete();
+
+        return $this->success(null, 'Meeting berhasil dihapus.');
+    }
+
     public function cancel(Request $request, Meeting $meeting)
     {
         $this->authorize('update', $meeting);
