@@ -43,11 +43,11 @@ export default function MeetingDetailPage({ params }: { params: Promise<{ uuid: 
   const [actionError, setActionError] = useState<string | null>(null);
 
   const canManage = meeting && !["completed", "cancelled", "expired"].includes(meeting.status);
-  // Deleting a completed/active/waiting meeting would erase a real
-  // verification record (or a call in progress) — only scheduling
-  // mistakes and already-cancelled/expired entries are eligible, and only
-  // an admin can do it.
-  const canDelete = meeting && user?.role === "admin" && !["waiting", "active", "completed"].includes(meeting.status);
+  // Active/waiting is a live call in progress — deleting the row out from
+  // under it would orphan the LiveKit room/participants mid-session, so
+  // that stays blocked. Every other status (including completed) is
+  // deletable by admins.
+  const canDelete = meeting && user?.role === "admin" && !["waiting", "active"].includes(meeting.status);
 
   return (
     <>
@@ -250,7 +250,7 @@ export default function MeetingDetailPage({ params }: { params: Promise<{ uuid: 
       <ConfirmDialog
         open={confirmDelete}
         title="Hapus Meeting Ini?"
-        description="Tindakan ini tidak dapat dibatalkan. Meeting yang sudah selesai atau sedang berlangsung tidak dapat dihapus."
+        description="Tindakan ini tidak dapat dibatalkan. Data hasil verifikasi dan rekaman (jika ada) akan ikut terhapus permanen."
         confirmLabel="Ya, Hapus"
         destructive
         isLoading={deleteMeeting.isPending}

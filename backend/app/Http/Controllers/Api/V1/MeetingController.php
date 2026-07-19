@@ -206,22 +206,32 @@ class MeetingController extends Controller
     }
 
     /**
-     * Only non-completed, non-in-progress meetings can be hard-deleted.
-     * Completed meetings are the actual verification record (result,
-     * notes, recording) and active/waiting ones are a live call in
-     * progress — neither should ever be permanently erasable. Admins use
-     * "Batalkan" for those; delete is for cleaning up scheduling mistakes
-     * or old cancelled/expired entries.
+     * Active/waiting meetings are a live call in progress — deleting the
+     * row out from under it would orphan the LiveKit room/participants
+     * mid-session, so that's blocked for technical safety, not policy.
+     * Every other status (including completed) is deletable by admins;
+     * any recording file is removed from storage too so it doesn't
+     * linger with no DB row pointing at it.
      */
     public function destroy(Meeting $meeting)
     {
         $this->authorize('delete', $meeting);
 
-        if (in_array($meeting->status, [MeetingStatus::Active, MeetingStatus::Waiting, MeetingStatus::Completed], true)) {
+        if (in_array($meeting->status, [MeetingStatus::Active, MeetingStatus::Waiting], true)) {
             return $this->error(
-                'Meeting yang sedang berlangsung atau sudah selesai tidak dapat dihapus.',
+                'Meeting yang sedang berlangsung tidak dapat dihapus.',
                 'MEETING_NOT_DELETABLE'
             );
+        }
+
+        if ($meeting->recording_url) {
+            // The .mp4 is keyed by meeting uuid, but egress also writes a
+            // small manifest file keyed by egress_id alongside it — clean
+            // up both so nothing orphaned is left in the bucket.
+            Storage::disk('recordings')->delete(array_filter([
+                $this->liveKit->recordingObjectKey($meeting),
+                $meeting->egress_id ? "{$meeting->egress_id}.json" : null,
+            ]));
         }
 
         $meeting->delete();

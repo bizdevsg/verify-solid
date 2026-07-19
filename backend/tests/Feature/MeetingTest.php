@@ -177,10 +177,39 @@ class MeetingTest extends TestCase
         $this->assertDatabaseMissing('meetings', ['id' => $meeting->id]);
     }
 
-    public function test_admin_cannot_delete_a_completed_meeting(): void
+    public function test_admin_can_delete_a_completed_meeting(): void
     {
         $admin = User::factory()->admin()->create();
         $meeting = Meeting::factory()->completed()->create();
+
+        $response = $this->actingAs($admin)->deleteJson("/api/v1/meetings/{$meeting->uuid}");
+
+        $response->assertOk();
+        $this->assertDatabaseMissing('meetings', ['id' => $meeting->id]);
+    }
+
+    public function test_deleting_a_completed_meeting_removes_its_recording_file(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $meeting = Meeting::factory()->completed()->create([
+            'recording_status' => \App\Enums\RecordingStatus::Ready,
+            'recording_url' => 'placeholder',
+        ]);
+
+        $disk = \Illuminate\Support\Facades\Storage::fake('recordings');
+        $key = app(\App\Services\LiveKitService::class)->recordingObjectKey($meeting);
+        $disk->put($key, 'fake-video-bytes');
+
+        $response = $this->actingAs($admin)->deleteJson("/api/v1/meetings/{$meeting->uuid}");
+
+        $response->assertOk();
+        $disk->assertMissing($key);
+    }
+
+    public function test_admin_cannot_delete_a_waiting_meeting(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $meeting = Meeting::factory()->create(['status' => MeetingStatus::Waiting]);
 
         $response = $this->actingAs($admin)->deleteJson("/api/v1/meetings/{$meeting->uuid}");
 
