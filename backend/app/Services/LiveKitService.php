@@ -47,7 +47,12 @@ class LiveKitService
             $client->createRoom(new RoomCreateOptions([
                 'name' => $roomName,
                 'emptyTimeout' => 300,
-                'maxParticipants' => 2,
+                // 3, not 2: staff + customer are the human participants, but
+                // the Participant Egress recorder (see startRecording()) also
+                // joins the room as a participant and counts against this cap.
+                // At 2, the egress bot took the customer's slot and LiveKit
+                // rejected the customer the instant they tried to join.
+                'maxParticipants' => 3,
             ]));
         } catch (\Throwable $e) {
             Log::warning('LiveKit createRoom failed', ['room' => $roomName, 'error' => $e->getMessage()]);
