@@ -54,8 +54,17 @@ services:
 
   livekit:
     restart: always
+    ports:
+      # TURN/TLS — a fallback path for clients whose network blocks/throttles
+      # the direct UDP media above, tunneling over TLS instead (see the
+      # `turn:` section in livekit.prod.yaml.template for why).
+      - "5349:5349"
     volumes:
       - ./infrastructure/livekit/livekit.prod.yaml:/etc/livekit.yaml:ro
+      # Read-only access to the same cert Certbot issues for livekit.${DOMAIN}
+      # (already mounted read-write into the certbot service, read-only here
+      # since LiveKit only ever reads it).
+      - certbot_conf:/etc/letsencrypt:ro
 
   minio:
     restart: always
