@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Test Koneksi Agora (Sementara)</title>
+<script src="https://download.agora.io/sdk/release/AgoraRTC_N-4.24.5.js"></script>
+<style>
+  :root {
+    --ink: #1c1c1e;
+    --paper: #f4f4f5;
+    --panel: #ffffff;
+    --border: #e4e4e7;
+    --gold: #c9a227;
+    --good: #1f7a4d;
+    --warn: #b23b2e;
+    --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: -apple-system, "Segoe UI", Arial, sans-serif;
+    padding: 20px;
+  }
+  main { max-width: 780px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .warn-banner {
+    background: #fff3cd;
+    border: 1px solid #e0c265;
+    color: #6b5410;
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-size: 13px;
+    margin-bottom: 18px;
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  label {
+    display: block;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: #555;
+    margin-bottom: 4px;
+  }
+  input {
+    width: 100%;
+    padding: 9px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 14px;
+    margin-bottom: 12px;
+  }
+  .row { display: flex; gap: 10px; }
+  .row > div { flex: 1; }
+  button {
+    font-size: 14px;
+    font-weight: 600;
+    padding: 10px 18px;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+  }
+  #joinBtn { background: var(--gold); color: #1c1c1e; }
+  #leaveBtn { background: #e5e5e5; color: #333; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 99px;
+    background: #eee;
+  }
+  .status-pill.connected { background: #e8f4ee; color: var(--good); }
+  .status-pill.bad { background: #fbebe8; color: var(--warn); }
+  .videos { display: flex; gap: 10px; flex-wrap: wrap; }
+  .video-box {
+    width: 100%;
+    max-width: 340px;
+    aspect-ratio: 4/3;
+    background: #111;
+    border-radius: 8px;
+    position: relative;
+    overflow: hidden;
+  }
+  .video-box .tag {
+    position: absolute;
+    bottom: 6px;
+    left: 8px;
+    color: #fff;
+    font-size: 11px;
+    background: rgba(0,0,0,0.5);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  #log {
+    background: #111;
+    color: #ddd;
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 12px;
+    border-radius: 8px;
+    height: 260px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    line-height: 1.6;
+  }
+  #log .t-warn { color: #ffb454; }
+  #log .t-bad { color: #ff6b6b; }
+  #log .t-good { color: #6bcf9a; }
+</style>
+</head>
+<body>
+<main>
+  <h1>🧪 Test Koneksi Agora</h1>
+  <div class="warn-banner">
+    Halaman ini <strong>sementara/testing saja</strong> — bukan bagian dari aplikasi Solid Video Verification.
+    Aman dihapus kapan saja setelah selesai testing. Tidak menyimpan data apapun ke database.
+  </div>
+
+  <div class="panel">
+    <label for="appId">App ID (dari Agora Console)</label>
+    <input id="appId" placeholder="contoh: a1b2c3d4e5f6..." />
+
+    <div class="row">
+      <div>
+        <label for="channel">Nama Channel</label>
+        <input id="channel" placeholder="test-channel-1" value="test-channel-1" />
+      </div>
+      <div>
+        <label for="token">Token (kosongkan jika App ID pakai mode testing tanpa sertifikat)</label>
+        <input id="token" placeholder="opsional" />
+      </div>
+    </div>
+
+    <button id="joinBtn">Gabung</button>
+    <button id="leaveBtn" disabled>Keluar</button>
+    <span id="statusPill" class="status-pill">Belum gabung</span>
+  </div>
+
+  <div class="panel">
+    <div class="videos">
+      <div class="video-box" id="localVideo"><span class="tag">Saya (lokal)</span></div>
+      <div class="video-box" id="remoteVideo"><span class="tag">Peserta lain</span></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <label>Log Koneksi (paling penting — ini yang membuktikan stabil/tidaknya)</label>
+    <div id="log"></div>
+  </div>
+</main>
+
+<script>
+  let client = null;
+  let localAudioTrack = null;
+  let localVideoTrack = null;
+
+  const logEl = document.getElementById("log");
+  const statusPill = document.getElementById("statusPill");
+  const joinBtn = document.getElementById("joinBtn");
+  const leaveBtn = document.getElementById("leaveBtn");
+
+  function log(msg, level) {
+    const time = new Date().toLocaleTimeString("id-ID", { hour12: false });
+    const cls = level ? `t-${level}` : "";
+    const line = document.createElement("div");
+    line.className = cls;
+    line.textContent = `[${time}] ${msg}`;
+    logEl.appendChild(line);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function setStatus(text, kind) {
+    statusPill.textContent = text;
+    statusPill.className = "status-pill" + (kind ? ` ${kind}` : "");
+  }
+
+  async function join() {
+    const appId = document.getElementById("appId").value.trim();
+    const channel = document.getElementById("channel").value.trim();
+    const token = document.getElementById("token").value.trim() || null;
+
+    if (!appId || !channel) {
+      alert("App ID dan nama channel wajib diisi.");
+      return;
+    }
+
+    joinBtn.disabled = true;
+    log("Menghubungkan ke Agora...");
+
+    client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
+
+    client.on("connection-state-change", (curState, prevState, reason) => {
+      const level = curState === "CONNECTED" ? "good" : curState === "DISCONNECTED" ? "bad" : "warn";
+      log(`STATUS KONEKSI: ${prevState} -> ${curState} (alasan: ${reason || "-"})`, level);
+      if (curState === "CONNECTED") setStatus("Terhubung", "connected");
+      else if (curState === "DISCONNECTED") setStatus("Terputus", "bad");
+      else setStatus(curState);
+    });
+
+    client.on("network-quality", (stats) => {
+      // uplinkNetworkQuality/downlinkNetworkQuality: 1=excellent ... 6=down
+      if (stats.uplinkNetworkQuality >= 4 || stats.downlinkNetworkQuality >= 4) {
+        log(`Kualitas jaringan JELEK (uplink=${stats.uplinkNetworkQuality}, downlink=${stats.downlinkNetworkQuality})`, "warn");
+      }
+    });
+
+    client.on("user-published", async (user, mediaType) => {
+      await client.subscribe(user, mediaType);
+      log(`Peserta lain (${user.uid}) mempublikasikan ${mediaType}`, "good");
+      if (mediaType === "video") {
+        user.videoTrack.play("remoteVideo");
+      } else {
+        user.audioTrack.play();
+      }
+    });
+
+    client.on("user-unpublished", (user, mediaType) => {
+      log(`Peserta lain (${user.uid}) berhenti mempublikasikan ${mediaType}`, "warn");
+    });
+
+    client.on("user-left", (user, reason) => {
+      log(`Peserta lain (${user.uid}) KELUAR dari channel (alasan: ${reason})`, "bad");
+    });
+
+    try {
+      const uid = await client.join(appId, channel, token, null);
+      log(`Berhasil join sebagai UID ${uid}`, "good");
+
+      localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack();
+      localVideoTrack = await AgoraRTC.createCameraVideoTrack();
+      localVideoTrack.play("localVideo");
+      await client.publish([localAudioTrack, localVideoTrack]);
+      log("Kamera & mikrofon berhasil dipublikasikan", "good");
+
+      leaveBtn.disabled = false;
+    } catch (err) {
+      log(`GAGAL: ${err.message || err}`, "bad");
+      setStatus("Gagal", "bad");
+      joinBtn.disabled = false;
+    }
+  }
+
+  async function leave() {
+    log("Meninggalkan channel...");
+    localAudioTrack?.close();
+    localVideoTrack?.close();
+    if (client) await client.leave();
+    setStatus("Belum gabung");
+    joinBtn.disabled = false;
+    leaveBtn.disabled = true;
+  }
+
+  joinBtn.addEventListener("click", join);
+  leaveBtn.addEventListener("click", leave);
+</script>
+</body>
+</html>
