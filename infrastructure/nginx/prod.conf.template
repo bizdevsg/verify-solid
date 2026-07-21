@@ -6,15 +6,15 @@ upstream backend_upstream {
     server backend:9000;
 }
 
-upstream livekit_upstream {
-    server livekit:7880;
+upstream minio_upstream {
+    server minio:9000;
 }
 
 # Plain HTTP: serve the Certbot challenge, redirect everything else to HTTPS.
-# Covers both the main domain and the LiveKit signaling subdomain.
+# Covers both the main domain and the recording-storage subdomain.
 server {
     listen 80;
-    server_name ${DOMAIN} livekit.${DOMAIN};
+    server_name ${DOMAIN} storage.${DOMAIN};
 
     location /.well-known/acme-challenge/ {
         root /var/www/certbot;
@@ -60,30 +60,35 @@ server {
     }
 }
 
-# LiveKit signaling (WSS). Browsers on an HTTPS page cannot open a plain
-# ws:// connection, so this subdomain gives LiveKit its own TLS-terminated
-# endpoint. Media itself (RTP/TURN) still flows over the directly published
-# UDP 50000-50100 / TCP 7881 ports — nginx only proxies the signaling
-# WebSocket here.
+# Recording storage (MinIO), reachable from the public internet on purpose:
+# Agora's Cloud Recording runs on Agora's own servers, not this VPS, so it
+# has to reach this bucket over the real internet to upload a finished
+# recording — the docker-internal `minio:9000` address only resolves inside
+# this compose network. MinIO itself still has no host port mapping (see
+# docker-compose.yml); nginx is what actually exposes it, over TLS, and only
+# a valid access key/secret can read or write anything through it.
 server {
     listen 443 ssl;
     http2 on;
-    server_name livekit.${DOMAIN};
+    server_name storage.${DOMAIN};
 
     ssl_certificate /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers HIGH:!aNULL:!MD5;
 
+    # Recordings can run tens of minutes — allow correspondingly large
+    # uploads and don't time out a slow one.
+    client_max_body_size 2G;
+    proxy_read_timeout 600s;
+    proxy_send_timeout 600s;
+
     location / {
-        proxy_pass http://livekit_upstream;
+        proxy_pass http://minio_upstream;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 3600s;
     }
 }

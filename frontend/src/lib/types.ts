@@ -105,9 +105,9 @@ export interface PublicMeetingSummary {
   joinable: boolean;
 }
 
-export interface LiveKitJoinInfo {
-  url: string;
+export interface AgoraJoinInfo {
+  app_id: string;
+  channel: string;
   token: string;
-  identity: string;
-  room_name: string;
+  uid: number;
 }

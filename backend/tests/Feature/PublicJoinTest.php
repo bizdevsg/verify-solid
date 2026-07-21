@@ -106,6 +106,6 @@ class PublicJoinTest extends TestCase
 
         $response = $this->postJson("/api/v1/public/join/{$token}/join-token", ['name' => 'Nasabah Uji']);
 
-        $response->assertOk()->assertJsonStructure(['data' => ['url', 'token', 'identity', 'room_name']]);
+        $response->assertOk()->assertJsonStructure(['data' => ['app_id', 'channel', 'token', 'uid']]);
     }
 }

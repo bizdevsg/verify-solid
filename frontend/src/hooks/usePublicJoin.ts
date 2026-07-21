@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api, ApiSuccess } from "@/lib/api";
-import { LiveKitJoinInfo, PublicMeetingSummary } from "@/lib/types";
+import { AgoraJoinInfo, PublicMeetingSummary } from "@/lib/types";
 
 export function usePublicMeeting(token: string, options?: { refetchInterval?: number }) {
   return useQuery({
@@ -27,7 +27,7 @@ export function usePublicWaiting(token: string) {
 export function usePublicJoinToken(token: string) {
   return useMutation({
     mutationFn: async (name: string) => {
-      const { data } = await api.post<ApiSuccess<LiveKitJoinInfo>>(`/public/join/${token}/join-token`, { name });
+      const { data } = await api.post<ApiSuccess<AgoraJoinInfo>>(`/public/join/${token}/join-token`, { name });
       return data.data;
     },
   });

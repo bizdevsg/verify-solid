@@ -13,13 +13,13 @@ use App\Http\Requests\Meeting\UpdateMeetingRequest;
 use App\Http\Resources\MeetingResource;
 use App\Models\Customer;
 use App\Models\Meeting;
-use App\Services\LiveKitService;
+use App\Services\AgoraService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 
 class MeetingController extends Controller
 {
-    public function __construct(protected LiveKitService $liveKit) {}
+    public function __construct(protected AgoraService $agora) {}
 
     public function index(Request $request)
     {
@@ -141,15 +141,16 @@ class MeetingController extends Controller
             return $this->error('Meeting belum dapat dimulai sebelum jadwal.', 'MEETING_TOO_EARLY');
         }
 
-        $this->liveKit->createRoom($meeting->room_name);
-
+        // No room to create ahead of time — an Agora channel exists
+        // implicitly for as long as someone is in it.
         $meeting->status = MeetingStatus::Active;
         $meeting->started_at ??= now();
 
         if ($meeting->recording_status !== RecordingStatus::Recording) {
-            $egressId = $this->liveKit->startRecording($meeting);
-            $meeting->egress_id = $egressId;
-            $meeting->recording_status = $egressId ? RecordingStatus::Recording : RecordingStatus::Failed;
+            $recording = $this->agora->startRecording($meeting);
+            $meeting->agora_resource_id = $recording['resource_id'] ?? null;
+            $meeting->agora_recording_sid = $recording['sid'] ?? null;
+            $meeting->recording_status = $recording ? RecordingStatus::Recording : RecordingStatus::Failed;
         }
 
         $meeting->save();
@@ -190,14 +191,22 @@ class MeetingController extends Controller
         $meeting->duration_seconds = $meeting->started_at ? $meeting->ended_at->diffInSeconds($meeting->started_at, true) : 0;
         $meeting->status = MeetingStatus::Completed;
 
-        if ($meeting->recording_status === RecordingStatus::Recording && $meeting->egress_id) {
-            $this->liveKit->stopEgress($meeting->egress_id);
-            $meeting->recording_status = RecordingStatus::Processing;
+        if ($meeting->recording_status === RecordingStatus::Recording) {
+            // Agora's stop call responds synchronously with the final file
+            // once upload completes — no webhook/callback needed to know
+            // the recording is ready, unlike LiveKit's async egress.
+            $fileKey = $this->agora->stopRecording($meeting);
+            $meeting->recording_url = $fileKey;
+            $meeting->recording_status = $fileKey ? RecordingStatus::Ready : RecordingStatus::Failed;
         }
 
         $meeting->save();
 
-        $this->liveKit->closeRoom($meeting->room_name);
+        if ($meeting->recording_status === RecordingStatus::Ready) {
+            $meeting->recordEvent('recording_ready', 'Rekaman video siap diunduh.');
+        } elseif ($meeting->recording_status === RecordingStatus::Failed) {
+            $meeting->recordEvent('recording_failed', 'Perekaman video gagal diproses.');
+        }
         $meeting->recordEvent('meeting_ended', 'Meeting diakhiri oleh '.$request->user()->name);
 
         $meeting->load(['customer', 'staff']);
@@ -207,7 +216,7 @@ class MeetingController extends Controller
 
     /**
      * Active/waiting meetings are a live call in progress — deleting the
-     * row out from under it would orphan the LiveKit room/participants
+     * row out from under it would orphan the Agora channel/participants
      * mid-session, so that's blocked for technical safety, not policy.
      * Every other status (including completed) is deletable by admins;
      * any recording file is removed from storage too so it doesn't
@@ -225,13 +234,7 @@ class MeetingController extends Controller
         }
 
         if ($meeting->recording_url) {
-            // The .mp4 is keyed by meeting uuid, but egress also writes a
-            // small manifest file keyed by egress_id alongside it — clean
-            // up both so nothing orphaned is left in the bucket.
-            Storage::disk('recordings')->delete(array_filter([
-                $this->liveKit->recordingObjectKey($meeting),
-                $meeting->egress_id ? "{$meeting->egress_id}.json" : null,
-            ]));
+            Storage::disk('recordings')->delete($meeting->recording_url);
         }
 
         $meeting->delete();
@@ -249,14 +252,14 @@ class MeetingController extends Controller
 
         $meeting->status = MeetingStatus::Cancelled;
 
-        if ($meeting->recording_status === RecordingStatus::Recording && $meeting->egress_id) {
-            $this->liveKit->stopEgress($meeting->egress_id);
-            $meeting->recording_status = RecordingStatus::Processing;
+        if ($meeting->recording_status === RecordingStatus::Recording) {
+            $fileKey = $this->agora->stopRecording($meeting);
+            $meeting->recording_url = $fileKey;
+            $meeting->recording_status = $fileKey ? RecordingStatus::Ready : RecordingStatus::Failed;
         }
 
         $meeting->save();
 
-        $this->liveKit->closeRoom($meeting->room_name);
         $meeting->recordEvent('meeting_cancelled', 'Meeting dibatalkan oleh '.$request->user()->name);
 
         $meeting->load(['customer', 'staff']);
@@ -285,14 +288,14 @@ class MeetingController extends Controller
             return $this->error('Meeting ini tidak dapat diikuti.', 'MEETING_NOT_JOINABLE');
         }
 
-        $identity = $this->liveKit->staffIdentity($meeting);
-        $token = $this->liveKit->generateParticipantToken($meeting, $identity, $request->user()->name);
+        $uid = AgoraService::UID_STAFF;
+        $token = $this->agora->generateToken($meeting->room_name, $uid);
 
         return $this->success([
-            'url' => $this->liveKit->url(),
+            'app_id' => $this->agora->appId(),
+            'channel' => $meeting->room_name,
             'token' => $token,
-            'identity' => $identity,
-            'room_name' => $meeting->room_name,
+            'uid' => $uid,
         ]);
     }
 
@@ -311,9 +314,9 @@ class MeetingController extends Controller
         }
 
         $disk = Storage::disk('recordings');
-        $key = $this->liveKit->recordingObjectKey($meeting);
+        $key = $meeting->recording_url;
 
-        if (! $disk->exists($key)) {
+        if (! $key || ! $disk->exists($key)) {
             return $this->error('File rekaman tidak ditemukan.', 'RECORDING_FILE_MISSING');
         }
 

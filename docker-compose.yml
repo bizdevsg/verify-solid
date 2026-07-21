@@ -35,8 +35,6 @@ services:
       DB_USERNAME: ${DB_USERNAME:-solid}
       DB_PASSWORD: ${DB_PASSWORD:-solid_secret}
       REDIS_HOST: redis
-      LIVEKIT_HOST: http://livekit:7880
-      LIVEKIT_URL: ws://localhost:7880
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin_secret}
       MINIO_ENDPOINT: http://minio:9000
@@ -74,28 +72,21 @@ services:
     networks:
       - solid-video-verification
 
-  livekit:
-    image: livekit/livekit-server:latest
-    command: --config /etc/livekit.yaml
-    restart: unless-stopped
-    ports:
-      - "7880:7880"
-      - "7881:7881"
-      - "50000-50100:50000-50100/udp"
-    volumes:
-      - ./infrastructure/livekit/livekit.yaml:/etc/livekit.yaml:ro
-    depends_on:
-      - redis
-    networks:
-      - solid-video-verification
-
-  # Recording storage for LiveKit Egress. Call recordings must not live in
-  # MySQL or behind a public URL (see backend/config/filesystems.php
+  # Recording storage for Agora Cloud Recording. Call recordings must not
+  # live in MySQL or behind a public URL (see backend/config/filesystems.php
   # "recordings" disk) — MinIO gives us an S3-compatible bucket the backend
   # streams from through its own authenticated download endpoint.
-  # Same as db/redis above: no host port mapping. The backend and egress
-  # containers reach it over the internal docker network at minio:9000 —
-  # nothing outside the compose network needs a direct connection.
+  #
+  # No host port mapping here (same as db/redis) — in production, nginx is
+  # what actually exposes this to the internet, over its own subdomain +
+  # TLS, since Agora's Cloud Recording runs on Agora's own servers and needs
+  # to reach this bucket over the real internet to upload a finished
+  # recording (see docker-compose.prod.yml and DEPLOYMENT.md). In local dev,
+  # nothing outside this compose network can reach it, which also means
+  # Agora's recording can't be tested end-to-end without either deploying
+  # for real or tunnelling this port out (e.g. ngrok) — the video call
+  # itself works fine locally regardless, since that's a direct
+  # browser-to-Agora connection with no dependency on this container.
   minio:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
@@ -125,19 +116,6 @@ services:
       mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin_secret} &&
       mc mb -p local/recordings
       "
-    networks:
-      - solid-video-verification
-
-  livekit-egress:
-    image: livekit/egress:latest
-    restart: unless-stopped
-    environment:
-      EGRESS_CONFIG_FILE: /etc/egress.yaml
-    volumes:
-      - ./infrastructure/livekit/egress.yaml:/etc/egress.yaml:ro
-    depends_on:
-      - redis
-      - livekit
     networks:
       - solid-video-verification
 

@@ -35,11 +35,17 @@ return [
         ],
     ],
 
-    'livekit' => [
-        'api_key' => env('LIVEKIT_API_KEY'),
-        'api_secret' => env('LIVEKIT_API_SECRET'),
-        'url' => env('LIVEKIT_URL'),
-        'host' => env('LIVEKIT_HOST'),
+    'agora' => [
+        'app_id' => env('AGORA_APP_ID'),
+        'app_certificate' => env('AGORA_APP_CERTIFICATE'),
+        // Separate from app_id/app_certificate — these authenticate the
+        // Cloud Recording REST API specifically (Agora Console > RESTful API).
+        'customer_id' => env('AGORA_CUSTOMER_ID'),
+        'customer_secret' => env('AGORA_CUSTOMER_SECRET'),
+        // Public hostname for the "recordings" MinIO bucket — Agora's cloud
+        // recording servers upload here directly over the internet, so this
+        // can't be the docker-internal `minio:9000` address.
+        'recording_storage_endpoint' => env('AGORA_RECORDING_STORAGE_ENDPOINT'),
     ],
 
 ];

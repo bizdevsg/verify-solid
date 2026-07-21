@@ -44,7 +44,7 @@ export default function MeetingDetailPage({ params }: { params: Promise<{ uuid: 
 
   const canManage = meeting && !["completed", "cancelled", "expired"].includes(meeting.status);
   // Active/waiting is a live call in progress — deleting the row out from
-  // under it would orphan the LiveKit room/participants mid-session, so
+  // under it would orphan the Agora channel/participants mid-session, so
   // that stays blocked. Every other status (including completed) is
   // deletable by admins.
   const canDelete = meeting && user?.role === "admin" && !["waiting", "active"].includes(meeting.status);

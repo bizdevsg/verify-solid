@@ -32,7 +32,8 @@ class Meeting extends Model
         'result',
         'recording_status',
         'recording_url',
-        'egress_id',
+        'agora_resource_id',
+        'agora_recording_sid',
     ];
 
     protected static function booted(): void
