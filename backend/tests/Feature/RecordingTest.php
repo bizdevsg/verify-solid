@@ -2,32 +2,26 @@
 
 namespace Tests\Feature;
 
-use Agence104\LiveKit\AccessToken;
-use Agence104\LiveKit\VideoGrant;
 use App\Enums\MeetingStatus;
 use App\Enums\RecordingStatus;
 use App\Models\Meeting;
 use App\Models\User;
-use App\Services\LiveKitService;
+use App\Services\AgoraService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
-use Livekit\EgressInfo;
-use Livekit\EgressStatus;
-use Livekit\WebhookEvent;
 use Tests\TestCase;
 
 class RecordingTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_starting_meeting_starts_recording_and_stores_egress_id(): void
+    public function test_starting_meeting_starts_recording_and_stores_resource_id(): void
     {
         $staff = User::factory()->create();
         $meeting = Meeting::factory()->create(['staff_id' => $staff->id, 'scheduled_at' => now()]);
 
-        $this->mock(LiveKitService::class, function ($mock) {
-            $mock->shouldReceive('createRoom')->once();
-            $mock->shouldReceive('startRecording')->once()->andReturn('EG_abc123');
+        $this->mock(AgoraService::class, function ($mock) {
+            $mock->shouldReceive('startRecording')->once()->andReturn(['resource_id' => 'RES123', 'sid' => 'SID456']);
         });
 
         $response = $this->actingAs($staff)->postJson("/api/v1/meetings/{$meeting->uuid}/start");
@@ -36,18 +30,18 @@ class RecordingTest extends TestCase
         $this->assertDatabaseHas('meetings', [
             'id' => $meeting->id,
             'recording_status' => RecordingStatus::Recording->value,
-            'egress_id' => 'EG_abc123',
+            'agora_resource_id' => 'RES123',
+            'agora_recording_sid' => 'SID456',
         ]);
         $this->assertDatabaseHas('meeting_events', ['meeting_id' => $meeting->id, 'event_type' => 'recording_started']);
     }
 
-    public function test_meeting_still_starts_when_egress_fails_to_start(): void
+    public function test_meeting_still_starts_when_recording_fails_to_start(): void
     {
         $staff = User::factory()->create();
         $meeting = Meeting::factory()->create(['staff_id' => $staff->id, 'scheduled_at' => now()]);
 
-        $this->mock(LiveKitService::class, function ($mock) {
-            $mock->shouldReceive('createRoom')->once();
+        $this->mock(AgoraService::class, function ($mock) {
             $mock->shouldReceive('startRecording')->once()->andReturn(null);
         });
 
@@ -58,11 +52,11 @@ class RecordingTest extends TestCase
             'id' => $meeting->id,
             'status' => MeetingStatus::Active->value,
             'recording_status' => RecordingStatus::Failed->value,
-            'egress_id' => null,
+            'agora_resource_id' => null,
         ]);
     }
 
-    public function test_ending_meeting_stops_egress_and_marks_processing(): void
+    public function test_ending_meeting_stops_recording_and_marks_ready(): void
     {
         $staff = User::factory()->create();
         $meeting = Meeting::factory()->create([
@@ -70,12 +64,44 @@ class RecordingTest extends TestCase
             'status' => MeetingStatus::Active,
             'started_at' => now()->subMinutes(10),
             'recording_status' => RecordingStatus::Recording,
-            'egress_id' => 'EG_abc123',
+            'agora_resource_id' => 'RES123',
+            'agora_recording_sid' => 'SID456',
         ]);
 
-        $this->mock(LiveKitService::class, function ($mock) {
-            $mock->shouldReceive('stopEgress')->once()->with('EG_abc123');
-            $mock->shouldReceive('closeRoom')->once();
+        $this->mock(AgoraService::class, function ($mock) {
+            $mock->shouldReceive('stopRecording')->once()->andReturn('uuid-folder/mix_file.mp4');
+        });
+
+        $response = $this->actingAs($staff)->postJson("/api/v1/meetings/{$meeting->uuid}/end", [
+            'result' => 'verified',
+        ]);
+
+        // Agora's stop call responds synchronously with the final file, so
+        // there's no "processing" limbo state like LiveKit's async egress
+        // needed — status goes straight to ready.
+        $response->assertOk()->assertJsonPath('data.recording_status', 'ready');
+        $this->assertDatabaseHas('meetings', [
+            'id' => $meeting->id,
+            'recording_status' => RecordingStatus::Ready->value,
+            'recording_url' => 'uuid-folder/mix_file.mp4',
+        ]);
+        $this->assertDatabaseHas('meeting_events', ['meeting_id' => $meeting->id, 'event_type' => 'recording_ready']);
+    }
+
+    public function test_ending_meeting_marks_recording_failed_when_stop_fails(): void
+    {
+        $staff = User::factory()->create();
+        $meeting = Meeting::factory()->create([
+            'staff_id' => $staff->id,
+            'status' => MeetingStatus::Active,
+            'started_at' => now()->subMinutes(10),
+            'recording_status' => RecordingStatus::Recording,
+            'agora_resource_id' => 'RES123',
+            'agora_recording_sid' => 'SID456',
+        ]);
+
+        $this->mock(AgoraService::class, function ($mock) {
+            $mock->shouldReceive('stopRecording')->once()->andReturn(null);
         });
 
         $response = $this->actingAs($staff)->postJson("/api/v1/meetings/{$meeting->uuid}/end", [
@@ -85,60 +111,15 @@ class RecordingTest extends TestCase
         $response->assertOk();
         $this->assertDatabaseHas('meetings', [
             'id' => $meeting->id,
-            'recording_status' => RecordingStatus::Processing->value,
-        ]);
-    }
-
-    public function test_webhook_marks_recording_ready_on_egress_complete(): void
-    {
-        $meeting = Meeting::factory()->create([
-            'recording_status' => RecordingStatus::Recording,
-            'egress_id' => 'EG_xyz789',
-        ]);
-
-        $response = $this->postSignedWebhook($this->egressEndedPayload('EG_xyz789', EgressStatus::EGRESS_COMPLETE));
-
-        $response->assertOk();
-        $this->assertDatabaseHas('meetings', [
-            'id' => $meeting->id,
-            'recording_status' => RecordingStatus::Ready->value,
-            'recording_url' => $meeting->uuid.'.mp4',
-        ]);
-        $this->assertDatabaseHas('meeting_events', ['meeting_id' => $meeting->id, 'event_type' => 'recording_ready']);
-    }
-
-    public function test_webhook_marks_recording_failed_on_egress_failure(): void
-    {
-        $meeting = Meeting::factory()->create([
-            'recording_status' => RecordingStatus::Recording,
-            'egress_id' => 'EG_broken',
-        ]);
-
-        $response = $this->postSignedWebhook($this->egressEndedPayload('EG_broken', EgressStatus::EGRESS_FAILED));
-
-        $response->assertOk();
-        $this->assertDatabaseHas('meetings', [
-            'id' => $meeting->id,
             'recording_status' => RecordingStatus::Failed->value,
         ]);
-    }
-
-    public function test_webhook_rejects_invalid_signature(): void
-    {
-        $body = $this->egressEndedPayload('EG_xyz789', EgressStatus::EGRESS_COMPLETE);
-
-        $response = $this->call('POST', '/api/v1/webhooks/livekit', [], [], [], [
-            'CONTENT_TYPE' => 'application/json',
-            'HTTP_AUTHORIZATION' => 'not-a-real-jwt',
-        ], $body);
-
-        $response->assertStatus(401);
+        $this->assertDatabaseHas('meeting_events', ['meeting_id' => $meeting->id, 'event_type' => 'recording_failed']);
     }
 
     public function test_recording_not_downloadable_before_ready(): void
     {
         $staff = User::factory()->create();
-        $meeting = Meeting::factory()->create(['staff_id' => $staff->id, 'recording_status' => RecordingStatus::Processing]);
+        $meeting = Meeting::factory()->create(['staff_id' => $staff->id, 'recording_status' => RecordingStatus::Recording]);
 
         $response = $this->actingAs($staff)->getJson("/api/v1/meetings/{$meeting->uuid}/recording");
 
@@ -148,10 +129,14 @@ class RecordingTest extends TestCase
     public function test_owner_staff_can_download_ready_recording(): void
     {
         $staff = User::factory()->create();
-        $meeting = Meeting::factory()->create(['staff_id' => $staff->id, 'recording_status' => RecordingStatus::Ready]);
+        $meeting = Meeting::factory()->create([
+            'staff_id' => $staff->id,
+            'recording_status' => RecordingStatus::Ready,
+            'recording_url' => 'uuid-folder/mix_file.mp4',
+        ]);
 
         $disk = Storage::fake('recordings');
-        $disk->put(app(LiveKitService::class)->recordingObjectKey($meeting), 'fake-video-bytes');
+        $disk->put('uuid-folder/mix_file.mp4', 'fake-video-bytes');
 
         $response = $this->actingAs($staff)->get("/api/v1/meetings/{$meeting->uuid}/recording");
 
@@ -163,7 +148,11 @@ class RecordingTest extends TestCase
     {
         $owner = User::factory()->create();
         $intruder = User::factory()->create();
-        $meeting = Meeting::factory()->create(['staff_id' => $owner->id, 'recording_status' => RecordingStatus::Ready]);
+        $meeting = Meeting::factory()->create([
+            'staff_id' => $owner->id,
+            'recording_status' => RecordingStatus::Ready,
+            'recording_url' => 'uuid-folder/mix_file.mp4',
+        ]);
 
         $response = $this->actingAs($intruder)->getJson("/api/v1/meetings/{$meeting->uuid}/recording");
 
@@ -173,7 +162,11 @@ class RecordingTest extends TestCase
     public function test_download_reports_missing_file(): void
     {
         $staff = User::factory()->create();
-        $meeting = Meeting::factory()->create(['staff_id' => $staff->id, 'recording_status' => RecordingStatus::Ready]);
+        $meeting = Meeting::factory()->create([
+            'staff_id' => $staff->id,
+            'recording_status' => RecordingStatus::Ready,
+            'recording_url' => 'uuid-folder/mix_file.mp4',
+        ]);
 
         Storage::fake('recordings');
 
@@ -182,31 +175,20 @@ class RecordingTest extends TestCase
         $response->assertStatus(422)->assertJsonPath('error.code', 'RECORDING_FILE_MISSING');
     }
 
-    private function egressEndedPayload(string $egressId, int $status): string
+    public function test_deleting_a_completed_meeting_removes_its_recording_file(): void
     {
-        $egressInfo = new EgressInfo([
-            'egress_id' => $egressId,
-            'status' => $status,
+        $admin = User::factory()->admin()->create();
+        $meeting = Meeting::factory()->completed()->create([
+            'recording_status' => RecordingStatus::Ready,
+            'recording_url' => 'uuid-folder/mix_file.mp4',
         ]);
 
-        $event = new WebhookEvent([
-            'event' => 'egress_ended',
-            'egress_info' => $egressInfo,
-        ]);
+        $disk = Storage::fake('recordings');
+        $disk->put('uuid-folder/mix_file.mp4', 'fake-video-bytes');
 
-        return $event->serializeToJsonString();
-    }
+        $response = $this->actingAs($admin)->deleteJson("/api/v1/meetings/{$meeting->uuid}");
 
-    private function postSignedWebhook(string $body)
-    {
-        $token = new AccessToken(config('services.livekit.api_key'), config('services.livekit.api_secret'));
-        $token->setGrant(new VideoGrant());
-        $token->setSha256(base64_encode(hash('sha256', $body, true)));
-        $jwt = $token->toJwt();
-
-        return $this->call('POST', '/api/v1/webhooks/livekit', [], [], [], [
-            'CONTENT_TYPE' => 'application/json',
-            'HTTP_AUTHORIZATION' => $jwt,
-        ], $body);
+        $response->assertOk();
+        $disk->assertMissing('uuid-folder/mix_file.mp4');
     }
 }

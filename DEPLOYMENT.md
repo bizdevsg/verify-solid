@@ -1,8 +1,8 @@
 # Production Deployment Guide
 
-Target setup: **one VPS running Docker Compose**, one domain you already own, LiveKit self-hosted
-on the same machine. This assumes Ubuntu/Debian-style VPS; adjust package manager commands if
-you're on something else.
+Target setup: **one VPS running Docker Compose**, one domain you already own, video calls/recording
+handled by Agora (managed — no self-hosted media server). This assumes Ubuntu/Debian-style VPS;
+adjust package manager commands if you're on something else.
 
 ## Architecture
 
@@ -10,22 +10,25 @@ you're on something else.
 Internet
    │
    ├── https://yourdomain.com          → nginx (443) → frontend (Next.js) / backend (Laravel API)
-   ├── https://livekit.yourdomain.com  → nginx (443) → livekit (signaling, WebSocket)
-   ├── UDP 50000-50100, TCP 7881       → livekit directly (media/RTP — nginx can't proxy this)
-   └── TCP 5349 (TLS)                  → livekit directly (TURN/TLS — fallback for clients whose
-                                          network blocks/throttles the direct UDP media above)
+   ├── https://storage.yourdomain.com  → nginx (443) → minio (recording storage)
+   └── (video/audio itself never touches this server — browsers connect directly
+        to Agora's network; Agora's Cloud Recording servers upload finished
+        recordings to storage.yourdomain.com over the internet)
 ```
 
-Two DNS records, one server, one Let's Encrypt certificate covering both hostnames.
+Two DNS records, one server, one Let's Encrypt certificate covering both hostnames. Notably
+smaller than a self-hosted-media-server setup: no media port range to open, no TURN server to run.
 
 ## 1. Prerequisites
 
 - A VPS with Docker + the Compose plugin installed (`docker compose version` should work).
-  Minimum realistically: 2 vCPU / 4GB RAM (MySQL + LiveKit + Next.js + Laravel all on one box).
+  Minimum realistically: 2 vCPU / 4GB RAM (MySQL + Next.js + Laravel all on one box — video
+  encoding/recording happens on Agora's infrastructure, not here).
 - A domain you control, able to add DNS records.
-- Ports **80, 443** open (HTTP/HTTPS), **7880, 7881** (TCP, LiveKit signaling/RTC),
-  **50000-50100/UDP** (LiveKit media), and **5349/TCP** (LiveKit TURN/TLS fallback) open in your
-  VPS firewall / cloud security group.
+- An [Agora](https://console.agora.io) account and project — see step 3 below for exactly which
+  credentials you need.
+- Ports **80, 443** open (HTTP/HTTPS) and SSH in your VPS firewall / cloud security group. Nothing
+  else needs to be opened — video/audio media never touches this server directly.
 
 ### DNS
 
@@ -34,7 +37,7 @@ ownership over HTTP, so both must resolve before you request the certificate:
 
 ```
 yourdomain.com          A    <VPS_IP>
-livekit.yourdomain.com  A    <VPS_IP>
+storage.yourdomain.com  A    <VPS_IP>
 ```
 
 ## 2. Get the code onto the server
@@ -44,7 +47,18 @@ git clone <your-repo-url> solid-video-verification
 cd solid-video-verification
 ```
 
-## 3. Configure environment files
+## 3. Set up Agora
+
+1. Create a project in the [Agora Console](https://console.agora.io). Copy its **App ID** and
+   enable/copy its **App Certificate** (needed so tokens are properly signed — don't run in
+   "App ID only" testing mode for production).
+2. Under **Agora Console > RESTful API**, generate a **Customer ID** / **Customer Secret** pair —
+   these are separate from the App ID/Certificate above, and are only used to authenticate Cloud
+   Recording API calls.
+3. Note your expected call volume — Agora bills per participant-minute past a monthly free tier;
+   see the README's "Video & Recording (Agora)" section for the cost model.
+
+## 4. Configure environment files
 
 ```bash
 cp .env.production.example .env
@@ -56,26 +70,32 @@ Edit **`.env`** (repo root) and fill in every `CHANGE_ME`:
 - `DOMAIN` — your real domain (no `https://`, no trailing slash)
 - `CERTBOT_EMAIL` — used for Let's Encrypt expiry notices
 - `DB_PASSWORD` / `DB_ROOT_PASSWORD` — generate with `openssl rand -hex 24`
-- `LIVEKIT_API_KEY` — generate with `openssl rand -hex 16`
-- `LIVEKIT_API_SECRET` — generate with `openssl rand -hex 32`
+- `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` — generate with `openssl rand -hex 24`. This bucket is
+  reachable from the public internet (see Architecture above), so don't reuse the `minioadmin` dev
+  default here.
 
 Edit **`backend/.env`** and fill in:
 
 - `APP_URL`, `FRONTEND_URL`, `SANCTUM_STATEFUL_DOMAINS`, `SESSION_DOMAIN`,
   `CORS_ALLOWED_ORIGINS` — replace `yourdomain.com` with your real domain
 - `DB_PASSWORD` — must match `DB_PASSWORD` in the root `.env`
+- `AGORA_APP_ID` / `AGORA_APP_CERTIFICATE` / `AGORA_CUSTOMER_ID` / `AGORA_CUSTOMER_SECRET` — from
+  step 3
+- `AGORA_RECORDING_STORAGE_ENDPOINT` — this one is actually overridden automatically by
+  `docker-compose.prod.yml` from your root `.env`'s `DOMAIN` (as `storage.$DOMAIN`), so you can
+  leave the placeholder here; it only matters if you ever run the backend outside Docker
 - Leave `APP_KEY` empty for now — the next step generates it
 
 **Do not skip this step or leave any `CHANGE_ME` in place.** `APP_DEBUG=false` and
 `SESSION_SECURE_COOKIE=true` are already set correctly in the template — don't flip them back.
 
-## 4. Build the images
+## 5. Build the images
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.prod.yml build
 ```
 
-## 5. Generate the Laravel app key
+## 6. Generate the Laravel app key
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.prod.yml run --rm backend \
@@ -84,34 +104,33 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml run --rm backend
 
 Copy the `base64:...` output into `backend/.env`'s `APP_KEY=`.
 
-## 6. Obtain the TLS certificate
+## 7. Obtain the TLS certificate
 
 ```bash
 chmod +x infrastructure/certbot/init-letsencrypt.sh \
-          infrastructure/nginx/render-prod-conf.sh \
-          infrastructure/livekit/render-prod-conf.sh
+          infrastructure/nginx/render-prod-conf.sh
 ./infrastructure/certbot/init-letsencrypt.sh
 ```
 
-This renders the nginx, LiveKit, and LiveKit Egress configs from your `.env`, starts nginx with a
-throwaway certificate, requests the real one from Let's Encrypt for both `yourdomain.com` and
-`livekit.yourdomain.com`, then reloads nginx onto it. It only needs to run once — renewal is
-handled automatically afterwards by the `certbot` service's background loop (checks twice a day,
-renews when within 30 days of expiry).
+This renders the nginx config from your `.env`, starts nginx with a throwaway certificate, requests
+the real one from Let's Encrypt for both `yourdomain.com` and `storage.yourdomain.com`, then reloads
+nginx onto it. It only needs to run once — renewal is handled automatically afterwards by the
+`certbot` service's background loop (checks twice a day, renews when within 30 days of expiry).
 
 If it fails, the most common cause is DNS not having propagated yet, or port 80 not actually being
 reachable from the internet (check your firewall/security group).
 
-## 7. Start everything
+## 8. Start everything
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 ```
 
 The backend container's entrypoint automatically waits for MySQL, runs migrations, and caches
-config/routes on every start — you don't need to run `migrate` by hand.
+config/routes on every start — you don't need to run `migrate` by hand. `minio-init` creates the
+`recordings` bucket automatically on first start too.
 
-## 8. Create your first admin account
+## 9. Create your first admin account
 
 **Do not run `php artisan db:seed`** — the demo seeder creates fake accounts with the
 well-known password `password`. Instead:
@@ -124,35 +143,22 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backend \
 You'll be prompted for a password (input hidden). Use this account to log in at
 `https://yourdomain.com/login` and create staff accounts and real customer/meeting data from there.
 
-## 9. Verify
+## 10. Verify
 
 - `https://yourdomain.com` — should load the login page over a valid HTTPS certificate (padlock,
   no warnings)
 - Log in, check the dashboard loads
 - Create a test customer + meeting, generate an invitation link, open it in a private window
-- Start the meeting as staff and join as the customer — video should connect (check the browser
-  console for `wss://livekit.yourdomain.com` connecting successfully, not `ERR_CONNECTION_REFUSED`)
-- **If a call randomly disconnects for both parties at once** with no consistent timing, first
-  rule out the server itself before suspecting the network:
-  `docker inspect $(docker compose -f docker-compose.yml -f docker-compose.prod.yml ps -q livekit) --format="OOMKilled: {{.State.OOMKilled}} | RestartCount: {{.RestartCount}}"`.
-  If that comes back clean (as it should, since Participant Egress alone is much lighter than a
-  Room Composite recording), the more likely cause is the client's own network blocking/throttling
-  the direct UDP media path (`50000-50100/udp`) — common on corporate WiFi and some mobile
-  carriers. The browser console will show `ConnectionError: could not establish pc connection` or
-  a WebSocket error specifically during a *reconnect* attempt (the initial connection often still
-  works, since it's the retry that needs TURN). That's what `turn.enabled` in
-  `infrastructure/livekit/livekit.prod.yaml.template` is for — it gives those clients a TLS
-  fallback on port 5349 using the same cert as `livekit.yourdomain.com`. Confirm it's actually
-  active with `docker compose -f docker-compose.yml -f docker-compose.prod.yml logs livekit | grep -i turn`
-  (should show the TURN listener starting on port 5349, no errors about the cert file).
+- Start the meeting as staff and join as the customer — video should connect. Check the browser
+  console for Agora's `connection-state-change` log settling on `CONNECTED`, not stuck on
+  `CONNECTING`/`RECONNECTING`
 - End the meeting, wait a few seconds, then refresh the meeting detail page — "Rekaman" should move
-  from "Sedang diproses..." to a working "Unduh Rekaman" link. If it stays on "Sedang diproses..."
-  or flips to "Gagal diproses", check the logs for the egress worker and the backend:
-  `docker compose -f docker-compose.yml -f docker-compose.prod.yml logs livekit-egress backend`
-  — a stuck `processing` status usually means LiveKit's webhook never reached
-  `http://nginx/api/v1/webhooks/livekit` (see `infrastructure/livekit/livekit.prod.yaml`'s
-  `webhook.urls`), while `failed` means the egress job itself errored (check the S3/MinIO
-  credentials in `backend/.env` match the root `.env`'s `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD`).
+  straight to a working "Unduh Rekaman" link (no "Sedang diproses..." limbo state, since Agora's
+  stop call responds synchronously). If it flips to "Gagal diproses", check the backend log:
+  `docker compose -f docker-compose.yml -f docker-compose.prod.yml logs backend | grep -i agora`
+  — this usually means either the Customer ID/Secret are wrong (Cloud Recording API calls get
+  rejected) or `storage.yourdomain.com` isn't actually reachable from the internet yet (DNS not
+  propagated, or the cert/nginx block isn't live) so Agora's upload fails.
 
 ## Updating / redeploying
 
@@ -162,12 +168,11 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ```
 
 Migrations run automatically on container start. If a deploy ever needs a config change (new
-`DOMAIN`, rotated LiveKit keys), re-run the two render scripts before restarting nginx/livekit:
+`DOMAIN`), re-render nginx and restart it:
 
 ```bash
 ./infrastructure/nginx/render-prod-conf.sh
-./infrastructure/livekit/render-prod-conf.sh
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d nginx livekit
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d nginx
 ```
 
 ## Backups
@@ -204,16 +209,18 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml exec nginx nginx
 - [ ] `SESSION_SECURE_COOKIE=true` in `backend/.env` (requires HTTPS, which you now have)
 - [ ] Demo seeder (`php artisan db:seed`) never run against this database
 - [ ] First admin created via `php artisan app:create-user`, not the seeded `admin@example.local`
-- [ ] `DB_PASSWORD` / `DB_ROOT_PASSWORD` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` are unique,
-      generated values — not copied from any `.example` file
-- [ ] Firewall only exposes 80, 443, 7880/7881, 50000-50100/udp, 5349/tcp, and SSH — not 3306
-      (MySQL), 9000 (php-fpm), or MinIO's 9000/9001, all of which should stay internal to the
-      Docker network (MinIO and MySQL/Redis have no host port mapping at all by default — nothing
-      to double-check there unless you added one yourself)
+- [ ] `DB_PASSWORD` / `DB_ROOT_PASSWORD` / `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` /
+      `AGORA_APP_CERTIFICATE` / `AGORA_CUSTOMER_SECRET` are unique, generated values — not copied
+      from any `.example` file
+- [ ] Firewall only exposes 80, 443, and SSH — not 3306 (MySQL), 9000 (php-fpm), or MinIO's raw
+      9000/9001, all of which should stay internal to the Docker network (MySQL/Redis/MinIO have no
+      host port mapping at all by default — nothing to double-check there unless you added one
+      yourself; MinIO is only reachable via nginx's `storage.yourdomain.com` TLS proxy)
+- [ ] `storage.yourdomain.com` is only reachable with a valid MinIO access key/secret — there's no
+      additional network-level restriction, so that credential pair is the entire access boundary
 - [ ] A backup routine exists for the `db_data` volume and runs somewhere other than this server
-- [ ] Recording resource usage has been sanity-checked for your VPS size — LiveKit Egress runs one
-      GStreamer process per active recording; on 2 vCPU/4GB this is fine for a handful of
-      simultaneous calls, but watch `docker stats` under real load
+- [ ] Agora billing/usage alerts are configured in the Agora Console if call volume could grow
+      unexpectedly — usage is metered, unlike the rest of this stack's flat VPS cost
 
 ## Known limitations that carry over from the MVP
 

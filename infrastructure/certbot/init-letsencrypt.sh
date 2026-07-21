@@ -11,9 +11,10 @@
 # Run from the repository root, after copying .env.production -> .env:
 #   ./infrastructure/certbot/init-letsencrypt.sh
 #
-# Requires DNS A records for both DOMAIN and livekit.DOMAIN pointing at this
-# server's public IP before running (the livekit subdomain is what gives the
-# video call signaling connection its own wss:// endpoint — see DEPLOYMENT.md).
+# Requires DNS A records for both DOMAIN and storage.DOMAIN pointing at this
+# server's public IP before running (the storage subdomain is what lets
+# Agora's Cloud Recording servers upload finished recordings to this
+# server's MinIO bucket over the internet — see DEPLOYMENT.md).
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
@@ -36,9 +37,6 @@ COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
 echo "== Rendering nginx config for ${DOMAIN} =="
 ./infrastructure/nginx/render-prod-conf.sh
 
-echo "== Rendering LiveKit config =="
-./infrastructure/livekit/render-prod-conf.sh
-
 echo "== Creating a temporary self-signed certificate for ${DOMAIN} =="
 $COMPOSE run --rm --entrypoint "sh -c '\
   mkdir -p /etc/letsencrypt/live/${DOMAIN} && \
@@ -56,10 +54,10 @@ $COMPOSE run --rm --entrypoint "sh -c '\
          /etc/letsencrypt/archive/${DOMAIN} \
          /etc/letsencrypt/renewal/${DOMAIN}.conf'" certbot
 
-echo "== Requesting the real certificate from Let's Encrypt (covers ${DOMAIN} and livekit.${DOMAIN}) =="
+echo "== Requesting the real certificate from Let's Encrypt (covers ${DOMAIN} and storage.${DOMAIN}) =="
 $COMPOSE run --rm --entrypoint "\
   certbot certonly --webroot -w /var/www/certbot \
-    --email ${CERTBOT_EMAIL} -d ${DOMAIN} -d livekit.${DOMAIN} \
+    --email ${CERTBOT_EMAIL} -d ${DOMAIN} -d storage.${DOMAIN} \
     --rsa-key-size 2048 --agree-tos --non-interactive --force-renewal" certbot
 
 echo "== Reloading nginx with the real certificate =="

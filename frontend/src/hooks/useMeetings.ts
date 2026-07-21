@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiSuccess } from "@/lib/api";
-import { LiveKitJoinInfo, Meeting, MeetingResult, MeetingStatus, PaginatedResult } from "@/lib/types";
+import { AgoraJoinInfo, Meeting, MeetingResult, MeetingStatus, PaginatedResult } from "@/lib/types";
 
 export interface MeetingInput {
   customer_uuid: string;
@@ -98,7 +98,7 @@ export const useRegenerateInvitation = (uuid: string) => useMeetingAction(uuid, 
 export function useMeetingJoinToken(uuid: string) {
   return useMutation({
     mutationFn: async () => {
-      const { data } = await api.post<ApiSuccess<LiveKitJoinInfo>>(`/meetings/${uuid}/join-token`);
+      const { data } = await api.post<ApiSuccess<AgoraJoinInfo>>(`/meetings/${uuid}/join-token`);
       return data.data;
     },
   });

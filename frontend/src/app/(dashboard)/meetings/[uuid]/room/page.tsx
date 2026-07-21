@@ -38,7 +38,7 @@ export default function StaffMeetingRoomPage({ params }: { params: Promise<{ uui
   };
 
   // Stable reference — an inline arrow here would change identity on every
-  // re-render and needlessly cycle the LiveKit room's event listeners.
+  // re-render and needlessly re-trigger VideoRoom's connect effect.
   const handleLeave = useCallback(() => {
     router.push(`/meetings/${uuid}`);
   }, [router, uuid]);
@@ -67,8 +67,10 @@ export default function StaffMeetingRoomPage({ params }: { params: Promise<{ uui
   return (
     <div className="fixed inset-0 flex flex-col bg-charcoal">
       <VideoRoom
-        url={joinToken.data.url}
+        appId={joinToken.data.app_id}
+        channel={joinToken.data.channel}
         token={joinToken.data.token}
+        uid={joinToken.data.uid}
         title={meeting.title}
         startedAt={meeting.started_at ? new Date(meeting.started_at) : null}
         onLeave={handleLeave}

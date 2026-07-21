@@ -42,9 +42,9 @@ services:
   backend:
     restart: always
     environment:
-      LIVEKIT_URL: wss://livekit.${DOMAIN}
-      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
-      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+      # Derived from the same DOMAIN as everything else so it can't drift
+      # out of sync with the nginx server_name / Let's Encrypt cert below.
+      AGORA_RECORDING_STORAGE_ENDPOINT: storage.${DOMAIN}
 
   db:
     restart: always
@@ -52,30 +52,11 @@ services:
   redis:
     restart: always
 
-  livekit:
-    restart: always
-    ports:
-      # TURN/TLS — a fallback path for clients whose network blocks/throttles
-      # the direct UDP media above, tunneling over TLS instead (see the
-      # `turn:` section in livekit.prod.yaml.template for why).
-      - "5349:5349"
-    volumes:
-      - ./infrastructure/livekit/livekit.prod.yaml:/etc/livekit.yaml:ro
-      # Read-only access to the same cert Certbot issues for livekit.${DOMAIN}
-      # (already mounted read-write into the certbot service, read-only here
-      # since LiveKit only ever reads it).
-      - certbot_conf:/etc/letsencrypt:ro
-
   minio:
     restart: always
 
   minio-init:
     restart: "no"
-
-  livekit-egress:
-    restart: always
-    volumes:
-      - ./infrastructure/livekit/egress.prod.yaml:/etc/egress.yaml:ro
 
 volumes:
   certbot_conf:

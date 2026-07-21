@@ -12,12 +12,11 @@ export default function CustomerRoomPage({ params }: { params: Promise<{ token: 
   const router = useRouter();
   // No refetchInterval here: this page used to poll every 5s to detect a
   // cancelled/completed meeting, but each refetch re-rendered this page and
-  // handed VideoRoom a brand-new inline onLeave/onError closure, which
-  // re-triggered LiveKit's connect effect — reconnecting the call over and
-  // over (looked like random disconnects + choppy video). Staff ending or
-  // cancelling the meeting already closes the LiveKit room server-side,
-  // which fires VideoRoom's onDisconnected for us — no polling needed while
-  // actually in the call.
+  // handed VideoRoom a brand-new inline onLeave closure, which re-triggered
+  // the connect effect — reconnecting the call over and over (looked like
+  // random disconnects + choppy video). The other side leaving already
+  // fires VideoRoom's onLeave via Agora's "user-left" event — no polling
+  // needed while actually in the call.
   const { data: meeting } = usePublicMeeting(token);
   const joinToken = usePublicJoinToken(token);
   const [name] = useState<string | null>(() => (typeof window === "undefined" ? null : sessionStorage.getItem(CUSTOMER_NAME_KEY)));
@@ -61,8 +60,10 @@ export default function CustomerRoomPage({ params }: { params: Promise<{ token: 
   return (
     <div className="fixed inset-0 flex flex-col bg-charcoal">
       <VideoRoom
-        url={joinToken.data.url}
+        appId={joinToken.data.app_id}
+        channel={joinToken.data.channel}
         token={joinToken.data.token}
+        uid={joinToken.data.uid}
         title={meeting?.title ?? "Verifikasi Video"}
         startedAt={null}
         onLeave={handleLeave}

@@ -7,12 +7,12 @@ use App\Enums\ParticipantType;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Public\ConfirmJoinRequest;
 use App\Models\Meeting;
-use App\Services\LiveKitService;
+use App\Services\AgoraService;
 use Illuminate\Http\Request;
 
 class JoinController extends Controller
 {
-    public function __construct(protected LiveKitService $liveKit) {}
+    public function __construct(protected AgoraService $agora) {}
 
     public function show(string $token)
     {
@@ -75,8 +75,8 @@ class JoinController extends Controller
         }
 
         $name = (string) $request->string('name', 'Nasabah');
-        $identity = $this->liveKit->customerIdentity($meeting);
-        $tokenJwt = $this->liveKit->generateParticipantToken($meeting, $identity, $name);
+        $uid = AgoraService::UID_CUSTOMER;
+        $tokenJwt = $this->agora->generateToken($meeting->room_name, $uid);
 
         $meeting->participants()->updateOrCreate(
             ['meeting_id' => $meeting->id, 'participant_type' => ParticipantType::Customer],
@@ -88,10 +88,10 @@ class JoinController extends Controller
         }
 
         return $this->success([
-            'url' => $this->liveKit->url(),
+            'app_id' => $this->agora->appId(),
+            'channel' => $meeting->room_name,
             'token' => $tokenJwt,
-            'identity' => $identity,
-            'room_name' => $meeting->room_name,
+            'uid' => $uid,
         ]);
     }
 

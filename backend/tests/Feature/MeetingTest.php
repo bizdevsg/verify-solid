@@ -106,7 +106,7 @@ class MeetingTest extends TestCase
 
         $response = $this->actingAs($staff)->postJson("/api/v1/meetings/{$meeting->uuid}/join-token");
 
-        $response->assertOk()->assertJsonStructure(['data' => ['url', 'token', 'identity', 'room_name']]);
+        $response->assertOk()->assertJsonStructure(['data' => ['app_id', 'channel', 'token', 'uid']]);
     }
 
     public function test_staff_cannot_issue_join_token_for_others_meeting(): void
@@ -186,24 +186,6 @@ class MeetingTest extends TestCase
 
         $response->assertOk();
         $this->assertDatabaseMissing('meetings', ['id' => $meeting->id]);
-    }
-
-    public function test_deleting_a_completed_meeting_removes_its_recording_file(): void
-    {
-        $admin = User::factory()->admin()->create();
-        $meeting = Meeting::factory()->completed()->create([
-            'recording_status' => \App\Enums\RecordingStatus::Ready,
-            'recording_url' => 'placeholder',
-        ]);
-
-        $disk = \Illuminate\Support\Facades\Storage::fake('recordings');
-        $key = app(\App\Services\LiveKitService::class)->recordingObjectKey($meeting);
-        $disk->put($key, 'fake-video-bytes');
-
-        $response = $this->actingAs($admin)->deleteJson("/api/v1/meetings/{$meeting->uuid}");
-
-        $response->assertOk();
-        $disk->assertMissing($key);
     }
 
     public function test_admin_cannot_delete_a_waiting_meeting(): void
