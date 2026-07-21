@@ -11,7 +11,9 @@ Internet
    │
    ├── https://yourdomain.com          → nginx (443) → frontend (Next.js) / backend (Laravel API)
    ├── https://livekit.yourdomain.com  → nginx (443) → livekit (signaling, WebSocket)
-   └── UDP 50000-50100, TCP 7881       → livekit directly (media/RTP — nginx can't proxy this)
+   ├── UDP 50000-50100, TCP 7881       → livekit directly (media/RTP — nginx can't proxy this)
+   └── TCP 5349 (TLS)                  → livekit directly (TURN/TLS — fallback for clients whose
+                                          network blocks/throttles the direct UDP media above)
 ```
 
 Two DNS records, one server, one Let's Encrypt certificate covering both hostnames.
@@ -21,8 +23,9 @@ Two DNS records, one server, one Let's Encrypt certificate covering both hostnam
 - A VPS with Docker + the Compose plugin installed (`docker compose version` should work).
   Minimum realistically: 2 vCPU / 4GB RAM (MySQL + LiveKit + Next.js + Laravel all on one box).
 - A domain you control, able to add DNS records.
-- Ports **80, 443** open (HTTP/HTTPS), **7880, 7881** (TCP, LiveKit signaling/RTC), and
-  **50000-50100/UDP** (LiveKit media) open in your VPS firewall / cloud security group.
+- Ports **80, 443** open (HTTP/HTTPS), **7880, 7881** (TCP, LiveKit signaling/RTC),
+  **50000-50100/UDP** (LiveKit media), and **5349/TCP** (LiveKit TURN/TLS fallback) open in your
+  VPS firewall / cloud security group.
 
 ### DNS
 
@@ -129,6 +132,19 @@ You'll be prompted for a password (input hidden). Use this account to log in at
 - Create a test customer + meeting, generate an invitation link, open it in a private window
 - Start the meeting as staff and join as the customer — video should connect (check the browser
   console for `wss://livekit.yourdomain.com` connecting successfully, not `ERR_CONNECTION_REFUSED`)
+- **If a call randomly disconnects for both parties at once** with no consistent timing, first
+  rule out the server itself before suspecting the network:
+  `docker inspect $(docker compose -f docker-compose.yml -f docker-compose.prod.yml ps -q livekit) --format="OOMKilled: {{.State.OOMKilled}} | RestartCount: {{.RestartCount}}"`.
+  If that comes back clean (as it should, since Participant Egress alone is much lighter than a
+  Room Composite recording), the more likely cause is the client's own network blocking/throttling
+  the direct UDP media path (`50000-50100/udp`) — common on corporate WiFi and some mobile
+  carriers. The browser console will show `ConnectionError: could not establish pc connection` or
+  a WebSocket error specifically during a *reconnect* attempt (the initial connection often still
+  works, since it's the retry that needs TURN). That's what `turn.enabled` in
+  `infrastructure/livekit/livekit.prod.yaml.template` is for — it gives those clients a TLS
+  fallback on port 5349 using the same cert as `livekit.yourdomain.com`. Confirm it's actually
+  active with `docker compose -f docker-compose.yml -f docker-compose.prod.yml logs livekit | grep -i turn`
+  (should show the TURN listener starting on port 5349, no errors about the cert file).
 - End the meeting, wait a few seconds, then refresh the meeting detail page — "Rekaman" should move
   from "Sedang diproses..." to a working "Unduh Rekaman" link. If it stays on "Sedang diproses..."
   or flips to "Gagal diproses", check the logs for the egress worker and the backend:
@@ -190,10 +206,10 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml exec nginx nginx
 - [ ] First admin created via `php artisan app:create-user`, not the seeded `admin@example.local`
 - [ ] `DB_PASSWORD` / `DB_ROOT_PASSWORD` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` are unique,
       generated values — not copied from any `.example` file
-- [ ] Firewall only exposes 80, 443, 7880/7881, 50000-50100/udp, and SSH — not 3306 (MySQL),
-      9000 (php-fpm), or MinIO's 9000/9001, all of which should stay internal to the Docker network
-      (MinIO and MySQL/Redis have no host port mapping at all by default — nothing to double-check
-      there unless you added one yourself)
+- [ ] Firewall only exposes 80, 443, 7880/7881, 50000-50100/udp, 5349/tcp, and SSH — not 3306
+      (MySQL), 9000 (php-fpm), or MinIO's 9000/9001, all of which should stay internal to the
+      Docker network (MinIO and MySQL/Redis have no host port mapping at all by default — nothing
+      to double-check there unless you added one yourself)
 - [ ] A backup routine exists for the `db_data` volume and runs somewhere other than this server
 - [ ] Recording resource usage has been sanity-checked for your VPS size — LiveKit Egress runs one
       GStreamer process per active recording; on 2 vCPU/4GB this is fine for a handful of
