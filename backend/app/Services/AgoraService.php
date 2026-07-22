@@ -99,6 +99,11 @@ class AgoraService
                         'channelType' => 0, // Communication profile — matches the 1:1 "rtc" mode clients join with
                         'streamTypes' => 2, // audio + video
                         'maxIdleTime' => 30,
+                        // Agora defaults to HLS-only (.m3u8 playlist + separate
+                        // .ts segments) when this is omitted, which is useless
+                        // for a single downloadable file — we only ever serve
+                        // the recording as one MP4 download, never stream it.
+                        'avFileType' => ['mp4'],
                         'transcodingConfig' => [
                             'width' => 640,
                             'height' => 360,
