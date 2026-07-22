@@ -167,13 +167,28 @@ class AgoraService
 
             $fileList = $resp->json('serverResponse.fileList');
 
-            if (is_array($fileList) && count($fileList) > 0) {
+            // Agora reports fileList two ways depending on fileListMode:
+            // "json" (array of per-file objects, used when there are
+            // multiple output files) or "string" (a single file path,
+            // typical for single-file mix/HLS output) — both must be
+            // handled or a successfully uploaded recording gets marked
+            // Failed even though the file already landed in storage.
+            $fileName = null;
+
+            if (is_string($fileList) && $fileList !== '') {
+                $fileName = $fileList;
+            } elseif (is_array($fileList) && count($fileList) > 0) {
                 $entry = collect($fileList)->first(fn ($f) => is_array($f) && ($f['mixedAllUser'] ?? false) === true) ?? $fileList[0];
                 $fileName = is_array($entry) ? ($entry['fileName'] ?? null) : $entry;
+            }
 
-                if ($fileName) {
-                    return $meeting->uuid.'/'.ltrim((string) $fileName, '/');
-                }
+            if ($fileName) {
+                // fileName already includes the fileNamePrefix folder we set
+                // in startRecording() (storageConfig.fileNamePrefix), so it
+                // must NOT be prefixed with the meeting uuid again here —
+                // doing so previously pointed recording_url at a path one
+                // level too deep, past where the file actually landed.
+                return ltrim((string) $fileName, '/');
             }
 
             Log::warning('Agora stop recording had no fileList', ['meeting' => $meeting->uuid, 'body' => $resp->body()]);
