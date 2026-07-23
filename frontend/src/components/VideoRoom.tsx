@@ -236,7 +236,14 @@ function VideoTile({ track }: { track: PlayableVideoTrack }) {
 
   useEffect(() => {
     if (containerRef.current) {
-      track.play(containerRef.current, { fit: "cover" });
+      // "cover" crops to fill the tile whenever the camera's aspect ratio
+      // doesn't match the tile's — e.g. a portrait phone stream inside this
+      // (usually wider) box gets scaled up and its top/bottom sliced off,
+      // which looks identical to someone holding the camera too close.
+      // "contain" always shows the full frame (letterboxed if needed), so
+      // framing in the actual call matches what was seen during device
+      // check instead of being re-cropped by whatever shape this tile is.
+      track.play(containerRef.current, { fit: "contain" });
     }
     return () => {
       track.stop();
