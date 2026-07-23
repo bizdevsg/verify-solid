@@ -10,7 +10,6 @@ import { MeetingTable } from "@/components/MeetingTable";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useAuth } from "@/lib/auth-context";
 import { useCustomer, useDeleteCustomer } from "@/hooks/useCustomers";
-import { formatDate } from "@/lib/format";
 import { getApiErrorMessage } from "@/lib/api";
 
 export default function CustomerDetailPage({ params }: { params: Promise<{ uuid: string }> }) {
@@ -50,9 +49,6 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ uuid:
                       </button>
                     }
                   />
-                  <Info label="Tanggal Lahir" value={formatDate(customer.date_of_birth)} />
-                  <Info label="Alamat" value={customer.address || "-"} />
-                  <Info label="Catatan" value={customer.notes || "-"} />
                 </dl>
               </div>
               <div className="flex gap-2">

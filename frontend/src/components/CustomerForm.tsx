@@ -11,9 +11,6 @@ const schema = z.object({
   email: z.union([z.literal(""), z.string().email("Format email tidak valid")]).optional(),
   phone: z.string().min(1, "Nomor telepon wajib diisi").max(30),
   identity_number: z.string().min(1, "Nomor identitas wajib diisi").max(50),
-  address: z.string().max(2000).optional(),
-  date_of_birth: z.string().optional(),
-  notes: z.string().max(2000).optional(),
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -40,9 +37,6 @@ export function CustomerForm({
       email: defaultValues?.email ?? "",
       phone: defaultValues?.phone ?? "",
       identity_number: defaultValues?.identity_number ?? "",
-      address: defaultValues?.address ?? "",
-      date_of_birth: defaultValues?.date_of_birth ?? "",
-      notes: defaultValues?.notes ?? "",
     },
   });
 
@@ -50,9 +44,6 @@ export function CustomerForm({
     onSubmit({
       ...values,
       email: values.email || null,
-      address: values.address || null,
-      date_of_birth: values.date_of_birth || null,
-      notes: values.notes || null,
     });
   });
 
@@ -71,16 +62,7 @@ export function CustomerForm({
         <Field label="Nomor Identitas (KTP)" error={errors.identity_number?.message}>
           <input {...register("identity_number")} className={inputClass} />
         </Field>
-        <Field label="Tanggal Lahir" error={errors.date_of_birth?.message}>
-          <input {...register("date_of_birth")} type="date" className={inputClass} />
-        </Field>
       </div>
-      <Field label="Alamat" error={errors.address?.message}>
-        <textarea {...register("address")} rows={2} className={inputClass} />
-      </Field>
-      <Field label="Catatan" error={errors.notes?.message}>
-        <textarea {...register("notes")} rows={3} className={inputClass} />
-      </Field>
 
       <button
         type="submit"
