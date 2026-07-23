@@ -10,6 +10,7 @@ export default function DeviceCheckPage({ params }: { params: Promise<{ token: s
   const { token } = use(params);
   const router = useRouter();
   const [ready, setReady] = useState(false);
+  const [positionConfirmed, setPositionConfirmed] = useState(false);
   const [name] = useState<string | null>(() => (typeof window === "undefined" ? null : sessionStorage.getItem(CUSTOMER_NAME_KEY)));
   const [error, setError] = useState<string | null>(null);
   const waiting = usePublicWaiting(token);
@@ -29,10 +30,24 @@ export default function DeviceCheckPage({ params }: { params: Promise<{ token: s
 
       <DeviceCheck onReady={setReady} />
 
+      {ready && (
+        <label className="flex items-start gap-2 rounded-md border border-gray-border bg-gray-light px-3 py-2.5 text-sm">
+          <input
+            type="checkbox"
+            checked={positionConfirmed}
+            onChange={(e) => setPositionConfirmed(e.target.checked)}
+            className="mt-0.5 rounded border-gray-border"
+          />
+          <span className="text-zinc-700">
+            Saya sudah memastikan wajah saya masuk ke dalam bingkai dan HP dipegang sejajar mata
+          </span>
+        </label>
+      )}
+
       {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
       <button
-        disabled={!ready || !name || waiting.isPending}
+        disabled={!ready || !positionConfirmed || !name || waiting.isPending}
         onClick={() => {
           if (!name) return;
           setError(null);

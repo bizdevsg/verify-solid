@@ -55,12 +55,20 @@ export function DeviceCheck({ onReady }: { onReady: (ready: boolean) => void }) 
           <>
             {/* Face-positioning guide: helps customers hold the phone at eye
                 level and center their face before joining, instead of
-                staff having to correct an awkward camera angle live. */}
+                staff having to correct an awkward camera angle live. Made
+                deliberately hard to miss (bright pulsing border, corner
+                markers) since a subtle dashed line was easy to join without
+                actually looking at. */}
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-              <div className="h-[68%] aspect-[3/4] rounded-[50%] border-2 border-dashed border-gold/80" />
+              <div className="relative h-[70%] aspect-[3/4]">
+                <div className="absolute inset-0 animate-pulse rounded-[50%] border-[3px] border-gold shadow-[0_0_0_9999px_rgba(0,0,0,0.35)]" />
+              </div>
             </div>
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-3 py-3 text-center text-xs font-medium text-white">
-              Posisikan wajah Anda di dalam bingkai — pegang HP sejajar mata
+            <div className="pointer-events-none absolute inset-x-0 top-0 bg-gradient-to-b from-black/85 to-transparent px-3 pb-6 pt-3 text-center">
+              <p className="text-sm font-semibold text-white">Posisikan wajah Anda di dalam bingkai</p>
+              <p className="mt-0.5 text-xs text-white/80">
+                Pegang HP sejajar mata (bukan menunduk) — jarak sekitar 30&ndash;40 cm dari wajah
+              </p>
             </div>
           </>
         )}
