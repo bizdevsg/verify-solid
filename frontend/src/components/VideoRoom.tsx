@@ -10,6 +10,11 @@ import type {
   IMicrophoneAudioTrack,
   ConnectionState,
 } from "agora-rtc-sdk-ng";
+// Type-only: the runtime module is loaded via dynamic import() inside the
+// join effect instead, since merely evaluating it touches browser globals
+// that don't exist during server-side rendering (or in jsdom tests).
+import type VirtualBackgroundExtensionType from "agora-extension-virtual-background";
+import type { IVirtualBackgroundProcessor } from "agora-extension-virtual-background";
 
 type PlayableVideoTrack = ICameraVideoTrack | IRemoteVideoTrack;
 import { MeetingTimer } from "@/components/MeetingTimer";
@@ -26,6 +31,25 @@ const UID_CUSTOMER = 2;
 // stays smooth on modest connections instead of the encoder fighting for
 // bandwidth and dropping frames (choppy video).
 const VIDEO_ENCODER_CONFIG = "360p_1";
+
+// Every verification call uses the same branded backdrop instead of
+// whatever's behind the staff/customer in real life.
+const DEFAULT_BACKGROUND_IMAGE = "/backgrounds/default-background.jpg";
+
+// The extension must be registered with AgoraRTC exactly once per page load
+// (not once per VideoRoom mount/unmount). Created lazily from inside the
+// effect below — never at module import time — so its WebGL feature
+// detection never runs during server-side rendering.
+let virtualBackgroundExtension: VirtualBackgroundExtensionType | null = null;
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error(`Failed to load image: ${src}`));
+    img.src = src;
+  });
+}
 
 interface VideoRoomProps {
   appId: string;
@@ -50,6 +74,7 @@ export function VideoRoom({ appId, channel, token, uid, title, startedAt, onLeav
   const clientRef = useRef<IAgoraRTCClient | null>(null);
   const localAudioRef = useRef<IMicrophoneAudioTrack | null>(null);
   const localVideoRef = useRef<ICameraVideoTrack | null>(null);
+  const virtualBackgroundProcessorRef = useRef<IVirtualBackgroundProcessor | null>(null);
 
   const [connectionState, setConnectionState] = useState<ConnectionState>("DISCONNECTED");
   const [localVideoTrack, setLocalVideoTrack] = useState<ICameraVideoTrack | null>(null);
@@ -104,6 +129,33 @@ export function VideoRoom({ appId, channel, token, uid, title, startedAt, onLeav
         localVideoRef.current = videoTrack;
         setLocalVideoTrack(videoTrack);
 
+        try {
+          if (!virtualBackgroundExtension) {
+            const { default: VirtualBackgroundExtension } = await import("agora-extension-virtual-background");
+            virtualBackgroundExtension = new VirtualBackgroundExtension();
+            AgoraRTC.registerExtensions([virtualBackgroundExtension]);
+          }
+          if (virtualBackgroundExtension.checkCompatibility()) {
+            const processor = virtualBackgroundExtension.createProcessor();
+            await processor.init();
+            const backgroundImage = await loadImage(DEFAULT_BACKGROUND_IMAGE);
+            processor.setOptions({ type: "img", source: backgroundImage, fit: "cover" });
+            videoTrack.pipe(processor).pipe(videoTrack.processorDestination);
+            await processor.enable();
+            if (cancelled) {
+              await processor.disable();
+              await processor.release();
+            } else {
+              virtualBackgroundProcessorRef.current = processor;
+            }
+          }
+        } catch (err) {
+          // Virtual background is a nice-to-have — if the device/browser
+          // can't run the WASM segmentation model, the call must still go
+          // on with the customer's real background.
+          console.error("Failed to enable virtual background", err);
+        }
+
         await client.publish([audioTrack, videoTrack]);
       } catch (err) {
         if (cancelled) return;
@@ -124,6 +176,11 @@ export function VideoRoom({ appId, channel, token, uid, title, startedAt, onLeav
       client.off("user-left", handleUserLeft);
       localAudioRef.current?.close();
       localVideoRef.current?.close();
+      const processor = virtualBackgroundProcessorRef.current;
+      if (processor) {
+        virtualBackgroundProcessorRef.current = null;
+        Promise.resolve(processor.disable()).finally(() => processor.release());
+      }
       client.leave();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
