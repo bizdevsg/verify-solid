@@ -309,7 +309,13 @@ function VideoTile({ track }: { track: PlayableVideoTrack }) {
       // "contain" always shows the full frame (letterboxed if needed), so
       // framing in the actual call matches what was seen during device
       // check instead of being re-cropped by whatever shape this tile is.
-      track.play(containerRef.current, { fit: "contain" });
+      //
+      // mirror: false — the SDK mirrors local tracks by default (selfie-style),
+      // but the virtual background bakes branded text/logo into the frame, so
+      // a mirrored self-view would show it backwards to whoever's looking at
+      // their own tile. Disabling it keeps every tile identical to what the
+      // other side (and the published stream) actually shows.
+      track.play(containerRef.current, { fit: "contain", mirror: false });
     }
     return () => {
       track.stop();
