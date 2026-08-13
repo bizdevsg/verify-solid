@@ -33,8 +33,16 @@ const UID_CUSTOMER = 2;
 const VIDEO_ENCODER_CONFIG = "360p_1";
 
 // Every verification call uses the same branded backdrop instead of
-// whatever's behind the staff/customer in real life.
-const DEFAULT_BACKGROUND_IMAGE = "/backgrounds/default-background.jpg";
+// whatever's behind the staff/customer in real life. Two crops are kept
+// because the source art is composed differently for a landscape camera
+// frame (desktop) vs. a portrait one (phone) — "cover" fit alone can't fix
+// a backdrop that was designed for the wrong orientation.
+const DESKTOP_BACKGROUND_IMAGE = "/backgrounds/default-background-desktop.jpg";
+const MOBILE_BACKGROUND_IMAGE = "/backgrounds/default-background-mobile.jpg";
+
+function isMobileDevice(): boolean {
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+}
 
 // The extension must be registered with AgoraRTC exactly once per page load
 // (not once per VideoRoom mount/unmount). Created lazily from inside the
@@ -138,7 +146,8 @@ export function VideoRoom({ appId, channel, token, uid, title, startedAt, onLeav
           if (virtualBackgroundExtension.checkCompatibility()) {
             const processor = virtualBackgroundExtension.createProcessor();
             await processor.init();
-            const backgroundImage = await loadImage(DEFAULT_BACKGROUND_IMAGE);
+            const backgroundImageUrl = isMobileDevice() ? MOBILE_BACKGROUND_IMAGE : DESKTOP_BACKGROUND_IMAGE;
+            const backgroundImage = await loadImage(backgroundImageUrl);
             processor.setOptions({ type: "img", source: backgroundImage, fit: "cover" });
             videoTrack.pipe(processor).pipe(videoTrack.processorDestination);
             await processor.enable();
