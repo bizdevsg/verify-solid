@@ -138,24 +138,28 @@ export function VideoRoom({ appId, channel, token, uid, title, startedAt, onLeav
         setLocalVideoTrack(videoTrack);
 
         try {
-          if (!virtualBackgroundExtension) {
-            const { default: VirtualBackgroundExtension } = await import("agora-extension-virtual-background");
-            virtualBackgroundExtension = new VirtualBackgroundExtension();
-            AgoraRTC.registerExtensions([virtualBackgroundExtension]);
-          }
-          if (virtualBackgroundExtension.checkCompatibility()) {
-            const processor = virtualBackgroundExtension.createProcessor();
-            await processor.init();
-            const backgroundImageUrl = isMobileDevice() ? MOBILE_BACKGROUND_IMAGE : DESKTOP_BACKGROUND_IMAGE;
-            const backgroundImage = await loadImage(backgroundImageUrl);
-            processor.setOptions({ type: "img", source: backgroundImage, fit: "cover" });
-            videoTrack.pipe(processor).pipe(videoTrack.processorDestination);
-            await processor.enable();
-            if (cancelled) {
-              await processor.disable();
-              await processor.release();
-            } else {
-              virtualBackgroundProcessorRef.current = processor;
+          // Only staff get the branded backdrop — the customer's own
+          // background is left alone.
+          if (uid !== UID_CUSTOMER) {
+            if (!virtualBackgroundExtension) {
+              const { default: VirtualBackgroundExtension } = await import("agora-extension-virtual-background");
+              virtualBackgroundExtension = new VirtualBackgroundExtension();
+              AgoraRTC.registerExtensions([virtualBackgroundExtension]);
+            }
+            if (virtualBackgroundExtension.checkCompatibility()) {
+              const processor = virtualBackgroundExtension.createProcessor();
+              await processor.init();
+              const backgroundImageUrl = isMobileDevice() ? MOBILE_BACKGROUND_IMAGE : DESKTOP_BACKGROUND_IMAGE;
+              const backgroundImage = await loadImage(backgroundImageUrl);
+              processor.setOptions({ type: "img", source: backgroundImage, fit: "cover" });
+              videoTrack.pipe(processor).pipe(videoTrack.processorDestination);
+              await processor.enable();
+              if (cancelled) {
+                await processor.disable();
+                await processor.release();
+              } else {
+                virtualBackgroundProcessorRef.current = processor;
+              }
             }
           }
         } catch (err) {
