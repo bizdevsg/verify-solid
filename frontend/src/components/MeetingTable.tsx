@@ -69,9 +69,19 @@ export function MeetingTable({
                 </>
               )}
               <td className="px-4 py-3 text-right">
-                <Link href={`/meetings/${meeting.uuid}`} className="text-sm font-medium text-gold hover:underline">
-                  Lihat Detail
-                </Link>
+                <div className="flex items-center justify-end gap-3">
+                  {meeting.recording_status === "ready" && meeting.recording_download_url && (
+                    <a
+                      href={meeting.recording_download_url}
+                      className="text-sm font-medium text-gold hover:underline"
+                    >
+                      Unduh Rekaman
+                    </a>
+                  )}
+                  <Link href={`/meetings/${meeting.uuid}`} className="text-sm font-medium text-zinc-600 hover:underline">
+                    Lihat Detail
+                  </Link>
+                </div>
               </td>
             </tr>
           ))}
