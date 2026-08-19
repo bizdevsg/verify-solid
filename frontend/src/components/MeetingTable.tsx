@@ -73,7 +73,7 @@ export function MeetingTable({
                   {meeting.recording_status === "ready" && meeting.recording_download_url && (
                     <a
                       href={meeting.recording_download_url}
-                      className="text-sm font-medium text-gold hover:underline"
+                      className="rounded-md bg-gold px-3 py-1.5 text-xs font-semibold text-charcoal hover:bg-gold-light"
                     >
                       Unduh Rekaman
                     </a>
