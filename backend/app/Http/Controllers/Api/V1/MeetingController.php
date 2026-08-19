@@ -142,17 +142,12 @@ class MeetingController extends Controller
         }
 
         // No room to create ahead of time — an Agora channel exists
-        // implicitly for as long as someone is in it.
+        // implicitly for as long as someone is in it. Recording itself
+        // only starts once the customer actually joins (see
+        // JoinController::joinToken), so it never captures dead air
+        // while staff waits alone for the customer to show up.
         $meeting->status = MeetingStatus::Active;
         $meeting->started_at ??= now();
-
-        if ($meeting->recording_status !== RecordingStatus::Recording) {
-            $recording = $this->agora->startRecording($meeting);
-            $meeting->agora_resource_id = $recording['resource_id'] ?? null;
-            $meeting->agora_recording_sid = $recording['sid'] ?? null;
-            $meeting->recording_status = $recording ? RecordingStatus::Recording : RecordingStatus::Failed;
-        }
-
         $meeting->save();
 
         $meeting->participants()->updateOrCreate(
@@ -162,9 +157,6 @@ class MeetingController extends Controller
 
         $meeting->recordEvent('meeting_started', 'Meeting dimulai oleh '.$request->user()->name);
         $meeting->recordEvent('staff_joined', $request->user()->name.' bergabung.');
-        if ($meeting->recording_status === RecordingStatus::Recording) {
-            $meeting->recordEvent('recording_started', 'Perekaman video dimulai.');
-        }
 
         $meeting->load(['customer', 'staff']);
 

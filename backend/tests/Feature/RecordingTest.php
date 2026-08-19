@@ -15,34 +15,13 @@ class RecordingTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_starting_meeting_starts_recording_and_stores_resource_id(): void
+    public function test_starting_meeting_does_not_start_recording_yet(): void
     {
         $staff = User::factory()->create();
         $meeting = Meeting::factory()->create(['staff_id' => $staff->id, 'scheduled_at' => now()]);
 
         $this->mock(AgoraService::class, function ($mock) {
-            $mock->shouldReceive('startRecording')->once()->andReturn(['resource_id' => 'RES123', 'sid' => 'SID456']);
-        });
-
-        $response = $this->actingAs($staff)->postJson("/api/v1/meetings/{$meeting->uuid}/start");
-
-        $response->assertOk()->assertJsonPath('data.recording_status', 'recording');
-        $this->assertDatabaseHas('meetings', [
-            'id' => $meeting->id,
-            'recording_status' => RecordingStatus::Recording->value,
-            'agora_resource_id' => 'RES123',
-            'agora_recording_sid' => 'SID456',
-        ]);
-        $this->assertDatabaseHas('meeting_events', ['meeting_id' => $meeting->id, 'event_type' => 'recording_started']);
-    }
-
-    public function test_meeting_still_starts_when_recording_fails_to_start(): void
-    {
-        $staff = User::factory()->create();
-        $meeting = Meeting::factory()->create(['staff_id' => $staff->id, 'scheduled_at' => now()]);
-
-        $this->mock(AgoraService::class, function ($mock) {
-            $mock->shouldReceive('startRecording')->once()->andReturn(null);
+            $mock->shouldNotReceive('startRecording');
         });
 
         $response = $this->actingAs($staff)->postJson("/api/v1/meetings/{$meeting->uuid}/start");
@@ -51,9 +30,9 @@ class RecordingTest extends TestCase
         $this->assertDatabaseHas('meetings', [
             'id' => $meeting->id,
             'status' => MeetingStatus::Active->value,
-            'recording_status' => RecordingStatus::Failed->value,
-            'agora_resource_id' => null,
+            'recording_status' => RecordingStatus::None->value,
         ]);
+        $this->assertDatabaseMissing('meeting_events', ['meeting_id' => $meeting->id, 'event_type' => 'recording_started']);
     }
 
     public function test_ending_meeting_stops_recording_and_marks_ready(): void

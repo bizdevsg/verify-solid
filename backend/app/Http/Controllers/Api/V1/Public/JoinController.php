@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1\Public;
 
 use App\Enums\MeetingStatus;
 use App\Enums\ParticipantType;
+use App\Enums\RecordingStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Public\ConfirmJoinRequest;
 use App\Models\Meeting;
@@ -82,6 +83,22 @@ class JoinController extends Controller
             ['meeting_id' => $meeting->id, 'participant_type' => ParticipantType::Customer],
             ['participant_name' => $name, 'joined_at' => now()]
         );
+
+        // Recording starts here, the moment the customer actually enters
+        // the room, rather than when staff starts the meeting — so it
+        // only ever captures the real verification interaction, not dead
+        // air while staff waits for the customer to show up.
+        if ($meeting->recording_status !== RecordingStatus::Recording) {
+            $recording = $this->agora->startRecording($meeting);
+            $meeting->agora_resource_id = $recording['resource_id'] ?? null;
+            $meeting->agora_recording_sid = $recording['sid'] ?? null;
+            $meeting->recording_status = $recording ? RecordingStatus::Recording : RecordingStatus::Failed;
+            $meeting->save();
+
+            if ($meeting->recording_status === RecordingStatus::Recording) {
+                $meeting->recordEvent('recording_started', 'Perekaman video dimulai.');
+            }
+        }
 
         if (! $meeting->events()->where('event_type', 'customer_joined')->exists()) {
             $meeting->recordEvent('customer_joined', $name.' bergabung ke meeting.');
